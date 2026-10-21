@@ -83,6 +83,8 @@ alter table public.leaves
   add column if not exists attachment_path text;
 
 -- Normalise duration values written by the other schema ('full_day', 'half_day_morning', ...).
+-- Its check constraint only allows those values, so drop it first; it is recreated below.
+alter table public.leaves drop constraint if exists leaves_duration_type_check;
 alter table public.leaves alter column duration_type set default 'full';
 update public.leaves
    set duration_type = case
