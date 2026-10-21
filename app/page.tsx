@@ -1,39 +1,64 @@
 "use client";
 
 import Link from "next/link";
+import { AttachmentLink } from "@/components/LeaveForm";
+import { Button, buttonClass, Card, cx, EmptyState, Loading, PageHeader, StatCard, StatusBadge, TypeBadge } from "@/components/ui";
 import { addDays, endOfMonth, formatDate, formatMonth, formatShort, startOfMonth, todayISO } from "@/lib/dates";
-import { approved, isOnLeave, leaveDays, leaveDaysWithin, overlapGroups, overlapsRange } from "@/lib/leave";
+import {
+  annualBalance,
+  approved,
+  describeDuration,
+  formatDays,
+  formatHours,
+  holidayOn,
+  isOnLeave,
+  leaveDaysWithin,
+  overlapGroups,
+  overlapsRange,
+} from "@/lib/leave";
 import { actions, useAppData } from "@/lib/store";
-import { Button, buttonClass, Card, EmptyState, Loading, PageHeader, StatCard, StatusBadge, TypeBadge } from "@/components/ui";
+import type { AppData } from "@/lib/types";
 
 const UPCOMING_WINDOW = 30;
 
 export default function Dashboard() {
   const data = useAppData();
   if (!data) return <Loading />;
+  return data.me.role === "admin" ? <TeamDashboard data={data} /> : <MyDashboard data={data} />;
+}
 
-  const { employees, leaves, settings } = data;
+function TeamDashboard({ data }: { data: AppData }) {
+  const { employees, leaves } = data;
   const today = todayISO();
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
+  const year = Number(today.slice(0, 4));
   const nameOf = (id: string) => employees.find((e) => e.id === id)?.name ?? "Unknown";
 
   const activeMembers = employees.filter((e) => e.active);
   const approvedLeaves = approved(leaves);
   const onLeaveNow = approvedLeaves.filter((l) => isOnLeave(l, today));
   const thisMonth = approvedLeaves.filter((l) => overlapsRange(l, monthStart, monthEnd));
-  const thisMonthDays = thisMonth.reduce((sum, l) => sum + leaveDaysWithin(l, monthStart, monthEnd, settings), 0);
+  const thisMonthDayLeaves = thisMonth.filter((l) => l.durationType !== "hourly");
+  const thisMonthDays = thisMonthDayLeaves.reduce((sum, l) => sum + leaveDaysWithin(l, monthStart, monthEnd, data), 0);
+  const thisMonthHours = thisMonth.reduce((sum, l) => sum + (l.durationType === "hourly" ? (l.hours ?? 0) : 0), 0);
   const upcoming = leaves
     .filter((l) => l.status !== "Rejected" && l.startDate > today && l.startDate <= addDays(today, UPCOMING_WINDOW))
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
   const overlaps = overlapGroups(leaves, today);
   const pending = leaves.filter((l) => l.status === "Pending").sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const lowBalance = activeMembers
+    .map((e) => ({ e, b: annualBalance(e, leaves, year, data) }))
+    .filter(({ b }) => b.remaining - b.pending <= 3)
+    .sort((a, b) => a.b.remaining - b.b.remaining);
+  const holidayToday = holidayOn(today, data.holidays);
+  const nextHoliday = data.holidays.find((h) => h.endDate >= today);
 
   return (
     <div>
       <PageHeader
         title="Dashboard"
-        description={`Overview for ${formatDate(today)}`}
+        description={`Overview for ${formatDate(today)}${holidayToday ? ` · 🎉 ${holidayToday.name}` : ""}`}
         actions={
           <Link href="/leaves?new=1" className={buttonClass()}>
             + New leave
@@ -41,33 +66,22 @@ export default function Dashboard() {
         }
       />
 
-      {employees.length === 0 && (
-        <div className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-900">
-          The database is empty. <Link href="/employees" className="font-medium underline">Add your team members</Link>, or load
-          the sample team (or import your earlier browser data) from <Link href="/settings" className="font-medium underline">Settings</Link>.
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          label="Team members"
-          value={activeMembers.length}
-          hint={`${employees.length - activeMembers.length} inactive`}
-        />
+        <StatCard label="Team members" value={activeMembers.length} hint={`${employees.length - activeMembers.length} inactive`} />
         <StatCard
           label="On leave today"
           value={onLeaveNow.length}
           hint={activeMembers.length ? `${Math.round((onLeaveNow.length / activeMembers.length) * 100)}% of the team` : undefined}
         />
         <StatCard
-          label={`${formatMonth(today)}`}
+          label={formatMonth(today)}
           value={
             <span>
-              {thisMonthDays}
+              {formatDays(thisMonthDays)}
               <span className="ml-1 text-base font-normal text-zinc-500">days</span>
             </span>
           }
-          hint={`${thisMonth.length} leave occasion${thisMonth.length === 1 ? "" : "s"} · approved only`}
+          hint={`${thisMonthDayLeaves.length} occasion${thisMonthDayLeaves.length === 1 ? "" : "s"}${thisMonthHours ? ` · ${formatHours(thisMonthHours)} permissions` : ""} · approved only`}
         />
         <StatCard label="Upcoming leaves" value={upcoming.length} hint={`Next ${UPCOMING_WINDOW} days, incl. pending`} />
         <StatCard
@@ -79,9 +93,45 @@ export default function Dashboard() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Panel title={`Pending approval (${pending.length})`}>
+          {pending.length === 0 ? (
+            <EmptyState>Nothing waiting for approval.</EmptyState>
+          ) : (
+            <ul className="divide-y divide-zinc-100">
+              {pending.map((l) => (
+                <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-zinc-900">
+                      {nameOf(l.employeeId)} <TypeBadge type={l.type} />
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {formatShort(l.startDate)}
+                      {l.endDate !== l.startDate && ` → ${formatShort(l.endDate)}`} · {describeDuration(l, data)}
+                      {l.backupEmployeeId && ` · backup: ${nameOf(l.backupEmployeeId)}`}
+                    </p>
+                    {l.attachmentPath && (
+                      <span className="text-xs">
+                        <AttachmentLink path={l.attachmentPath} compact />
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => actions.updateLeave(l.id, { status: "Approved" })}>
+                      Approve
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => actions.updateLeave(l.id, { status: "Rejected" })}>
+                      Reject
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
         <Panel title="Who's off today">
           {onLeaveNow.length === 0 ? (
-            <EmptyState>Everyone is in today 🎉</EmptyState>
+            <EmptyState>{holidayToday ? `Public holiday: ${holidayToday.name}` : "Everyone is in today 🎉"}</EmptyState>
           ) : (
             <ul className="divide-y divide-zinc-100">
               {onLeaveNow.map((l) => (
@@ -89,7 +139,8 @@ export default function Dashboard() {
                   <div>
                     <p className="font-medium text-zinc-900">{nameOf(l.employeeId)}</p>
                     <p className="text-xs text-zinc-500">
-                      Back on {formatDate(addDays(l.endDate, 1))}
+                      {l.durationType === "full" ? `Back on ${formatDate(addDays(l.endDate, 1))}` : describeDuration(l, data)}
+                      {l.backupEmployeeId && ` · backup: ${nameOf(l.backupEmployeeId)}`}
                     </p>
                   </div>
                   <TypeBadge type={l.type} />
@@ -129,8 +180,8 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <p className="truncate font-medium text-zinc-900">{nameOf(l.employeeId)}</p>
                     <p className="text-xs text-zinc-500">
-                      {formatShort(l.startDate)} → {formatShort(l.endDate)} · {leaveDays(l, settings)} day
-                      {leaveDays(l, settings) === 1 ? "" : "s"}
+                      {formatShort(l.startDate)}
+                      {l.endDate !== l.startDate && ` → ${formatShort(l.endDate)}`} · {describeDuration(l, data)}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
@@ -143,32 +194,37 @@ export default function Dashboard() {
           )}
         </Panel>
 
-        <Panel title={`Pending approval (${pending.length})`}>
-          {pending.length === 0 ? (
-            <EmptyState>Nothing waiting for approval.</EmptyState>
+        <Panel title={`Low annual balance (${year})`}>
+          {lowBalance.length === 0 ? (
+            <EmptyState>Everyone has more than 3 days left.</EmptyState>
           ) : (
             <ul className="divide-y divide-zinc-100">
-              {pending.map((l) => (
-                <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-zinc-900">
-                      {nameOf(l.employeeId)} <TypeBadge type={l.type} />
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      {formatShort(l.startDate)} → {formatShort(l.endDate)} · {leaveDays(l, settings)} days
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => actions.updateLeave(l.id, { status: "Approved" })}>
-                      Approve
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => actions.updateLeave(l.id, { status: "Rejected" })}>
-                      Reject
-                    </Button>
-                  </div>
+              {lowBalance.map(({ e, b }) => (
+                <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
+                  <span className="font-medium text-zinc-900">{e.name}</span>
+                  <span className={cx("tabular-nums", b.remaining < 0 ? "font-semibold text-rose-700" : "text-zinc-600")}>
+                    {formatDays(b.remaining)} / {formatDays(b.allowance)} days left
+                    {b.pending > 0 && <span className="text-zinc-400"> · {formatDays(b.pending)} pending</span>}
+                  </span>
                 </li>
               ))}
             </ul>
+          )}
+        </Panel>
+
+        <Panel title="Next public holiday">
+          {nextHoliday ? (
+            <div className="px-5 py-4 text-sm">
+              <p className="font-medium text-zinc-900">{nextHoliday.name}</p>
+              <p className="text-zinc-500">
+                {formatDate(nextHoliday.startDate)}
+                {nextHoliday.endDate !== nextHoliday.startDate && ` → ${formatDate(nextHoliday.endDate)}`}
+              </p>
+            </div>
+          ) : (
+            <EmptyState>
+              No upcoming holidays configured. <Link href="/settings" className="text-indigo-600 underline">Add them in Settings</Link>.
+            </EmptyState>
           )}
         </Panel>
       </div>
@@ -176,10 +232,117 @@ export default function Dashboard() {
   );
 }
 
+/** Employee view: own balance and requests only (the database only returns their own rows). */
+function MyDashboard({ data }: { data: AppData }) {
+  const today = todayISO();
+  const year = Number(today.slice(0, 4));
+  const me = data.me;
+  const balance = annualBalance(me, data.leaves, year, data);
+  const mine = data.leaves.filter((l) => l.employeeId === me.id).sort((a, b) => b.startDate.localeCompare(a.startDate));
+  const upcoming = mine.filter((l) => l.endDate >= today && l.status !== "Rejected").reverse();
+  const recent = mine.filter((l) => l.endDate < today || l.status === "Rejected").slice(0, 8);
+  const nameOf = (id: string) => data.directory.find((e) => e.id === id)?.name ?? "—";
+  const nextHoliday = data.holidays.find((h) => h.endDate >= today);
+  const pct = balance.allowance ? Math.min(100, (balance.used / balance.allowance) * 100) : 0;
+  const pendingPct = balance.allowance ? Math.min(100 - pct, (balance.pending / balance.allowance) * 100) : 0;
+
+  return (
+    <div>
+      <PageHeader
+        title={`Hi, ${me.name.split(" ")[0]}`}
+        description={`Your leave overview for ${year}`}
+        actions={
+          <Link href="/leaves?new=1" className={buttonClass()}>
+            + Request leave
+          </Link>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Remaining annual balance"
+          value={
+            <span className={balance.remaining < 0 ? "text-rose-700" : undefined}>
+              {formatDays(balance.remaining)}
+              <span className="ml-1 text-base font-normal text-zinc-500">of {formatDays(balance.allowance)} days</span>
+            </span>
+          }
+          hint={balance.pending ? `${formatDays(balance.pending)} more days pending approval` : "Approved leave only"}
+        />
+        <StatCard label="Days used" value={formatDays(balance.used)} hint={`${data.settings.deductingTypes.join(" + ")} leave, approved`} />
+        <StatCard label="Permission hours" value={formatHours(balance.permissionHours)} hint="Hourly permissions (Ozon) this year" />
+        <StatCard
+          label="Pending requests"
+          value={mine.filter((l) => l.status === "Pending").length}
+          hint={nextHoliday ? `Next holiday: ${nextHoliday.name}, ${formatShort(nextHoliday.startDate)}` : undefined}
+        />
+      </div>
+
+      <Card className="mt-4 p-5">
+        <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100">
+          <div className="bg-indigo-600" style={{ width: `${pct}%` }} title={`Used: ${formatDays(balance.used)}`} />
+          <div className="pending-stripes bg-indigo-300" style={{ width: `${pendingPct}%` }} title={`Pending: ${formatDays(balance.pending)}`} />
+        </div>
+        <div className="mt-2 flex flex-wrap gap-4 text-xs text-zinc-500">
+          <span>■ Used {formatDays(balance.used)}</span>
+          <span>▨ Pending {formatDays(balance.pending)}</span>
+          <span>□ Remaining after pending {formatDays(balance.remaining - balance.pending)}</span>
+        </div>
+      </Card>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Panel title="Upcoming & pending">
+          <RequestList leaves={upcoming} data={data} nameOf={nameOf} empty="No upcoming leave. Enjoy work 🙂" />
+        </Panel>
+        <Panel title="Recent">
+          <RequestList leaves={recent} data={data} nameOf={nameOf} empty="No past requests yet." />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function RequestList({
+  leaves,
+  data,
+  nameOf,
+  empty,
+}: {
+  leaves: AppData["leaves"];
+  data: AppData;
+  nameOf: (id: string) => string;
+  empty: string;
+}) {
+  if (!leaves.length) return <EmptyState>{empty}</EmptyState>;
+  return (
+    <ul className="divide-y divide-zinc-100">
+      {leaves.map((l) => (
+        <li key={l.id} className="flex items-center justify-between gap-3 px-5 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-zinc-900">
+              {formatShort(l.startDate)}
+              {l.endDate !== l.startDate && ` → ${formatShort(l.endDate)}`}
+              <span className="font-normal text-zinc-500"> · {describeDuration(l, data)}</span>
+            </p>
+            <p className="text-xs text-zinc-500">
+              {l.backupEmployeeId ? `Backup: ${nameOf(l.backupEmployeeId)}` : "No backup set"}
+              {l.notes && ` · ${l.notes}`}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            <TypeBadge type={l.type} />
+            <StatusBadge status={l.status} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Panel({ title, tone, children }: { title: string; tone?: "warning"; children: React.ReactNode }) {
   return (
     <Card className={tone === "warning" ? "border-amber-300" : undefined}>
-      <div className={tone === "warning" ? "border-b border-amber-200 bg-amber-50 px-5 py-3 rounded-t-xl" : "border-b border-zinc-100 px-5 py-3"}>
+      <div className={tone === "warning" ? "rounded-t-xl border-b border-amber-200 bg-amber-50 px-5 py-3" : "border-b border-zinc-100 px-5 py-3"}>
         <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
       </div>
       {children}

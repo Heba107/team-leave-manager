@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { LeaveForm } from "@/components/LeaveForm";
+import { AttachmentLink, LeaveForm } from "@/components/LeaveForm";
 import {
   Button,
   Card,
@@ -17,10 +17,10 @@ import {
 } from "@/components/ui";
 import { formatDate } from "@/lib/dates";
 import { exportCSV, exportExcel } from "@/lib/export";
-import { calendarDays, findTeamOverlaps, leaveDays } from "@/lib/leave";
+import { calendarDays, describeDuration, findTeamOverlaps, leaveDays, leaveHours } from "@/lib/leave";
 import { actions, useAppData } from "@/lib/store";
 import type { Leave, LeaveStatus, LeaveType } from "@/lib/types";
-import { LEAVE_STATUSES, LEAVE_TYPES } from "@/lib/types";
+import { DURATION_LABELS, LEAVE_STATUSES, LEAVE_TYPES } from "@/lib/types";
 
 export default function LeavesPage() {
   return (
@@ -44,7 +44,8 @@ function LeavesView() {
   const [to, setTo] = useState("");
 
   if (!data) return <Loading />;
-  const { employees, leaves, settings } = data;
+  const { employees, leaves, me } = data;
+  const admin = me.role === "admin";
 
   // ?new=1 (from the dashboard) or ?new=1&date=YYYY-MM-DD (from the calendar) opens the form directly.
   const fromLink = searchParams.get("new") === "1";
@@ -55,7 +56,8 @@ function LeavesView() {
     if (fromLink) router.replace("/leaves");
   };
 
-  const nameOf = (id: string) => employees.find((e) => e.id === id)?.name ?? "Unknown";
+  const nameOf = (id: string) =>
+    employees.find((e) => e.id === id)?.name ?? data.directory.find((e) => e.id === id)?.name ?? "Unknown";
   const q = query.trim().toLowerCase();
   const visible = leaves
     .filter((l) => !q || nameOf(l.employeeId).toLowerCase().includes(q) || l.notes.toLowerCase().includes(q))
@@ -66,32 +68,55 @@ function LeavesView() {
     .sort((a, b) => b.startDate.localeCompare(a.startDate));
 
   const hasFilters = q || typeFilter || statusFilter || from || to;
+  const canEdit = (l: Leave) => admin || (l.employeeId === me.id && l.status === "Pending");
 
-  function exportRows() {
+  const exportRows = () => {
     return [
-      ["Employee", "Department", "Leave Type", "Start Date", "End Date", "Leave Days", "Calendar Days", "Status", "Notes"],
+      [
+        "Employee",
+        "Department",
+        "Leave Type",
+        "Duration Type",
+        "Start Date",
+        "End Date",
+        "Leave Days",
+        "Permission Hours",
+        "Calendar Days",
+        "Backup Person",
+        "Status",
+        "Has Attachment",
+        "Notes",
+      ],
       ...visible.map((l) => {
         const emp = employees.find((e) => e.id === l.employeeId);
         return [
-          emp?.name ?? "Unknown",
+          emp?.name ?? nameOf(l.employeeId),
           emp?.department ?? "",
           l.type,
+          DURATION_LABELS[l.durationType],
           l.startDate,
           l.endDate,
-          leaveDays(l, settings),
+          leaveDays(l, data),
+          leaveHours(l),
           calendarDays(l.startDate, l.endDate),
+          l.backupEmployeeId ? nameOf(l.backupEmployeeId) : "",
           l.status,
+          l.attachmentPath ? "Yes" : "No",
           l.notes,
         ];
       }),
     ];
-  }
+  };
 
   return (
     <div>
       <PageHeader
-        title="Leave Records"
-        description="All leave requests. Only approved leaves count towards statistics."
+        title={admin ? "Leave Records" : "My Requests"}
+        description={
+          admin
+            ? "All leave requests. Only approved leaves count towards statistics and balances."
+            : "Your leave requests. You can edit or cancel a request while it's still pending."
+        }
         actions={
           <>
             <Button variant="secondary" onClick={() => exportCSV("leave-records.csv", exportRows())} disabled={!visible.length}>
@@ -104,21 +129,26 @@ function LeavesView() {
             >
               Export Excel
             </Button>
-            <Button onClick={() => setCreating(true)} disabled={!employees.some((e) => e.active)}>
-              + New leave
+            <Button onClick={() => setCreating(true)} disabled={admin && !employees.some((e) => e.active)}>
+              {admin ? "+ New leave" : "+ Request leave"}
             </Button>
           </>
         }
       />
 
       <Card>
-        <div className="grid grid-cols-1 gap-3 border-b border-zinc-100 p-4 sm:grid-cols-2 lg:grid-cols-6">
-          <input
-            className={cx(inputClass, "lg:col-span-2")}
-            placeholder="Search employee or notes…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+        <div className={cx("grid grid-cols-1 gap-3 border-b border-zinc-100 p-4 sm:grid-cols-2", admin ? "lg:grid-cols-6" : "lg:grid-cols-5")}>
+          {admin && (
+            <input
+              className={cx(inputClass, "lg:col-span-2")}
+              placeholder="Search employee or notes…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          )}
+          {!admin && (
+            <input className={inputClass} placeholder="Search notes…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          )}
           <select className={inputClass} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as LeaveType | "")}>
             <option value="">All types</option>
             {LEAVE_TYPES.map((t) => (
@@ -155,16 +185,17 @@ function LeavesView() {
         )}
 
         {visible.length === 0 ? (
-          <EmptyState>{leaves.length === 0 ? "No leave records yet." : "No records match your filters."}</EmptyState>
+          <EmptyState>{leaves.length === 0 ? (admin ? "No leave records yet." : "You haven't requested any leave yet.") : "No records match your filters."}</EmptyState>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 text-left text-xs font-medium uppercase tracking-wide text-zinc-500">
                 <tr>
-                  <th className="px-4 py-3">Employee</th>
+                  {admin && <th className="px-4 py-3">Employee</th>}
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Dates</th>
-                  <th className="px-4 py-3 text-right">Duration</th>
+                  <th className="px-4 py-3">Duration</th>
+                  <th className="px-4 py-3">Backup</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Notes</th>
                   <th className="px-4 py-3" />
@@ -172,11 +203,10 @@ function LeavesView() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {visible.map((l) => {
-                  const overlapCount = l.status === "Rejected" ? 0 : findTeamOverlaps(l, leaves).length;
-                  const days = leaveDays(l, settings);
+                  const overlapCount = admin && l.status !== "Rejected" && l.durationType !== "hourly" ? findTeamOverlaps(l, leaves).length : 0;
                   return (
                     <tr key={l.id} className="hover:bg-zinc-50">
-                      <td className="px-4 py-3 font-medium text-zinc-900">{nameOf(l.employeeId)}</td>
+                      {admin && <td className="px-4 py-3 font-medium text-zinc-900">{nameOf(l.employeeId)}</td>}
                       <td className="px-4 py-3">
                         <TypeBadge type={l.type} />
                       </td>
@@ -192,17 +222,19 @@ function LeavesView() {
                           </span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
-                        {days} day{days === 1 ? "" : "s"}
-                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-zinc-700">{describeDuration(l, data)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-zinc-600">{l.backupEmployeeId ? nameOf(l.backupEmployeeId) : "—"}</td>
                       <td className="px-4 py-3">
                         <StatusBadge status={l.status} />
                       </td>
-                      <td className="max-w-xs truncate px-4 py-3 text-zinc-500" title={l.notes}>
-                        {l.notes || "—"}
+                      <td className="max-w-xs px-4 py-3 text-zinc-500">
+                        <span className="block truncate" title={l.notes}>
+                          {l.notes || (l.attachmentPath ? "" : "—")}
+                        </span>
+                        {l.attachmentPath && <AttachmentLink path={l.attachmentPath} compact />}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
-                        {l.status === "Pending" && (
+                        {admin && l.status === "Pending" && (
                           <>
                             <Button size="sm" variant="ghost" className="text-emerald-700" onClick={() => actions.updateLeave(l.id, { status: "Approved" })}>
                               Approve
@@ -212,12 +244,16 @@ function LeavesView() {
                             </Button>
                           </>
                         )}
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(l)}>
-                          Edit
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => setDeleting(l)}>
-                          Delete
-                        </Button>
+                        {canEdit(l) && (
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => setEditing(l)}>
+                              Edit
+                            </Button>
+                            <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => setDeleting(l)}>
+                              {admin ? "Delete" : "Cancel"}
+                            </Button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );
@@ -228,7 +264,7 @@ function LeavesView() {
         )}
       </Card>
 
-      <Modal open={formOpen} title={editing ? "Edit leave" : "New leave request"} onClose={closeForm}>
+      <Modal open={formOpen} title={editing ? "Edit leave" : admin ? "New leave" : "Request leave"} onClose={closeForm}>
         {formOpen && (
           <LeaveForm
             key={editing?.id ?? "new"}
@@ -236,26 +272,35 @@ function LeavesView() {
             initial={editing ?? undefined}
             defaults={{ startDate: searchParams.get("date") ?? undefined }}
             onCancel={closeForm}
-            onSubmit={(input) => {
-              if (editing) actions.updateLeave(editing.id, input);
-              else actions.addLeave(input);
+            onSubmit={(input, file) => {
+              if (editing) actions.updateLeave(editing.id, input, file);
+              else actions.addLeave(input, file);
               closeForm();
             }}
           />
         )}
       </Modal>
 
-      <Modal open={deleting !== null} title="Delete leave record?" onClose={() => setDeleting(null)}>
+      <Modal open={deleting !== null} title={admin ? "Delete leave record?" : "Cancel this request?"} onClose={() => setDeleting(null)}>
         {deleting && (
           <div className="space-y-4 text-sm text-zinc-600">
             <p>
-              This permanently removes the {deleting.type.toLowerCase()} leave for{" "}
-              <strong className="text-zinc-900">{nameOf(deleting.employeeId)}</strong> ({formatDate(deleting.startDate)} →{" "}
-              {formatDate(deleting.endDate)}). To keep history, consider setting it to Rejected instead.
+              {admin ? (
+                <>
+                  This permanently removes the {deleting.type.toLowerCase()} leave for{" "}
+                  <strong className="text-zinc-900">{nameOf(deleting.employeeId)}</strong> ({formatDate(deleting.startDate)} →{" "}
+                  {formatDate(deleting.endDate)}). To keep history, consider setting it to Rejected instead.
+                </>
+              ) : (
+                <>
+                  Your {deleting.type.toLowerCase()} request for {formatDate(deleting.startDate)}
+                  {deleting.endDate !== deleting.startDate && ` → ${formatDate(deleting.endDate)}`} will be withdrawn.
+                </>
+              )}
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDeleting(null)}>
-                Cancel
+                Keep it
               </Button>
               <Button
                 variant="danger"
@@ -264,7 +309,7 @@ function LeavesView() {
                   setDeleting(null);
                 }}
               >
-                Delete
+                {admin ? "Delete" : "Cancel request"}
               </Button>
             </div>
           </div>

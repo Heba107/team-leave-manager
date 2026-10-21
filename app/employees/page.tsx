@@ -4,7 +4,7 @@ import { useState } from "react";
 import { EmployeeForm } from "@/components/EmployeeForm";
 import { Button, Card, cx, EmptyState, inputClass, Loading, Modal, PageHeader } from "@/components/ui";
 import { todayISO } from "@/lib/dates";
-import { approved, isOnLeave, leaveDaysWithin, overlapsRange } from "@/lib/leave";
+import { annualBalance, approved, formatDays, formatHours, isOnLeave } from "@/lib/leave";
 import { actions, useAppData } from "@/lib/store";
 import type { Employee } from "@/lib/types";
 
@@ -18,12 +18,12 @@ export default function EmployeesPage() {
   const [confirming, setConfirming] = useState<Employee | null>(null);
 
   if (!data) return <Loading />;
-  const { employees, leaves, settings } = data;
+  const { employees, leaves, me } = data;
 
   const today = todayISO();
-  const yearStart = today.slice(0, 4) + "-01-01";
-  const yearEnd = today.slice(0, 4) + "-12-31";
+  const year = Number(today.slice(0, 4));
   const approvedLeaves = approved(leaves);
+  const activeAdmins = employees.filter((e) => e.active && e.role === "admin").length;
 
   const q = query.trim().toLowerCase();
   const visible = employees
@@ -35,7 +35,7 @@ export default function EmployeesPage() {
     <div>
       <PageHeader
         title="Employees"
-        description="Add, edit, search and deactivate team members. Deactivated members keep their leave history."
+        description={`Manage team members, roles and ${year} annual allowances. Deactivated members keep their leave history.`}
         actions={<Button onClick={() => setEditing("new")}>+ Add member</Button>}
       />
 
@@ -72,12 +72,17 @@ export default function EmployeesPage() {
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Department</th>
-                  <th className="px-4 py-3">Position</th>
-                  <th className="px-4 py-3 text-right" title="Approved leaves this year">
-                    Occasions ({today.slice(0, 4)})
+                  <th className="px-4 py-3 text-right" title="Annual leave allowance">
+                    Allowance
                   </th>
-                  <th className="px-4 py-3 text-right" title="Approved leave days this year">
-                    Days ({today.slice(0, 4)})
+                  <th className="px-4 py-3 text-right" title={`Approved ${data.settings.deductingTypes.join(" + ")} days in ${year}`}>
+                    Used
+                  </th>
+                  <th className="px-4 py-3 text-right" title="Allowance minus used (pending not yet deducted)">
+                    Remaining
+                  </th>
+                  <th className="px-4 py-3 text-right" title={`Approved hourly permissions in ${year}`}>
+                    Permissions
                   </th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3" />
@@ -85,20 +90,41 @@ export default function EmployeesPage() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {visible.map((e) => {
-                  const mine = approvedLeaves.filter((l) => l.employeeId === e.id);
-                  const yearLeaves = mine.filter((l) => overlapsRange(l, yearStart, yearEnd));
-                  const yearDays = yearLeaves.reduce((s, l) => s + leaveDaysWithin(l, yearStart, yearEnd, settings), 0);
-                  const away = mine.some((l) => isOnLeave(l, today));
+                  const b = annualBalance(e, leaves, year, data);
+                  const away = approvedLeaves.some((l) => l.employeeId === e.id && isOnLeave(l, today) && l.durationType === "full");
+                  const lastAdmin = e.role === "admin" && e.active && activeAdmins <= 1;
                   return (
                     <tr key={e.id} className={cx("hover:bg-zinc-50", !e.active && "text-zinc-400")}>
                       <td className="px-4 py-3">
-                        <p className={cx("font-medium", e.active ? "text-zinc-900" : "text-zinc-500")}>{e.name}</p>
-                        {e.email && <p className="text-xs text-zinc-500">{e.email}</p>}
+                        <p className={cx("font-medium", e.active ? "text-zinc-900" : "text-zinc-500")}>
+                          {e.name}
+                          {e.role === "admin" && (
+                            <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">Admin</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {e.email || "no email"}
+                          {e.email && (e.userId ? <span title="Has signed up"> · ✓ account</span> : <span title="Hasn't signed up yet"> · not signed up</span>)}
+                        </p>
                       </td>
-                      <td className="px-4 py-3">{e.department || "—"}</td>
-                      <td className="px-4 py-3">{e.position || "—"}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{yearLeaves.length}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{yearDays}</td>
+                      <td className="px-4 py-3">
+                        {e.department || "—"}
+                        {e.position && <p className="text-xs text-zinc-500">{e.position}</p>}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{formatDays(b.allowance)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatDays(b.used)}
+                        {b.pending > 0 && <span className="block text-xs text-zinc-400">+{formatDays(b.pending)} pending</span>}
+                      </td>
+                      <td
+                        className={cx(
+                          "px-4 py-3 text-right font-semibold tabular-nums",
+                          b.remaining < 0 ? "text-rose-700" : b.remaining <= 3 ? "text-amber-700" : "text-zinc-900",
+                        )}
+                      >
+                        {formatDays(b.remaining)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-zinc-600">{b.permissionHours ? formatHours(b.permissionHours) : "—"}</td>
                       <td className="px-4 py-3">
                         {!e.active ? (
                           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">Inactive</span>
@@ -113,7 +139,14 @@ export default function EmployeesPage() {
                           Edit
                         </Button>
                         {e.active ? (
-                          <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => setConfirming(e)}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-rose-600"
+                            disabled={e.id === me.id || lastAdmin}
+                            title={e.id === me.id ? "You can't deactivate yourself" : lastAdmin ? "At least one admin is required" : undefined}
+                            onClick={() => setConfirming(e)}
+                          >
                             Deactivate
                           </Button>
                         ) : (
@@ -137,6 +170,7 @@ export default function EmployeesPage() {
             key={editing === "new" ? "new" : editing.id}
             initial={editing === "new" ? undefined : editing}
             existing={employees}
+            isSelf={editing !== "new" && editing.id === me.id}
             onCancel={() => setEditing(null)}
             onSubmit={(input) => {
               if (editing === "new") actions.addEmployee(input);
@@ -151,8 +185,8 @@ export default function EmployeesPage() {
         {confirming && (
           <div className="space-y-4 text-sm text-zinc-600">
             <p>
-              <strong className="text-zinc-900">{confirming.name}</strong> will be hidden from the active team and can no longer
-              be assigned new leave. Their existing leave records and statistics are kept, and you can reactivate them at any time.
+              <strong className="text-zinc-900">{confirming.name}</strong> will lose access to the app and can no longer be assigned new
+              leave. Their existing leave records and statistics are kept, and you can reactivate them at any time.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setConfirming(null)}>

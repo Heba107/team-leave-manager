@@ -1,23 +1,29 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { PostgrestError } from "@supabase/supabase-js";
-import { addDays, startOfWeek, todayISO } from "./dates";
+import type { PostgrestError, Session } from "@supabase/supabase-js";
 import { getSupabase } from "./supabase/client";
 import type { Database } from "./supabase/database.types";
-import type { AppData, Employee, Leave, Settings } from "./types";
+import type { AppData, Employee, Holiday, Leave, LeaveType, Settings } from "./types";
 
 type EmployeeRow = Database["public"]["Tables"]["employees"]["Row"];
 type LeaveRow = Database["public"]["Tables"]["leaves"]["Row"];
+type HolidayRow = Database["public"]["Tables"]["public_holidays"]["Row"];
 
-/** Key used by the earlier localStorage-only version; read once to offer an import. */
-export const LEGACY_STORAGE_KEY = "team-leave-manager:v1";
+export const ATTACHMENT_BUCKET = "leave-attachments";
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const ATTACHMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic"];
 
-const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6] };
+const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8 };
 const PAGE_SIZE = 1000;
 
 export interface StoreState {
-  status: "idle" | "loading" | "ready" | "error";
+  /**
+   * idle → loading → ready, or:
+   * signed-out: no session; unlinked: signed in but no active employee record matches the email.
+   */
+  status: "idle" | "loading" | "signed-out" | "unlinked" | "ready" | "error";
+  session: Session | null;
   data: AppData | null;
   /** Fatal load error (shown instead of the page). */
   error: string | null;
@@ -25,7 +31,7 @@ export interface StoreState {
   notice: string | null;
 }
 
-let state: StoreState = { status: "idle", data: null, error: null, notice: null };
+let state: StoreState = { status: "idle", session: null, data: null, error: null, notice: null };
 const listeners = new Set<() => void>();
 const SERVER_STATE: StoreState = state;
 
@@ -45,18 +51,13 @@ const toEmployee = (r: EmployeeRow): Employee => ({
   department: r.department,
   position: r.position,
   active: r.active,
+  role: r.role,
+  annualAllowance: Number(r.annual_allowance),
+  userId: r.user_id,
   createdAt: r.created_at,
 });
 
-const fromEmployee = (e: Employee) => ({
-  id: e.id,
-  name: e.name,
-  email: e.email,
-  department: e.department,
-  position: e.position,
-  active: e.active,
-  created_at: e.createdAt,
-});
+const hhmm = (t: string | null) => (t ? t.slice(0, 5) : null);
 
 const toLeave = (r: LeaveRow): Leave => ({
   id: r.id,
@@ -64,29 +65,31 @@ const toLeave = (r: LeaveRow): Leave => ({
   type: r.type,
   startDate: r.start_date,
   endDate: r.end_date,
+  durationType: r.duration_type,
+  startTime: hhmm(r.start_time),
+  endTime: hhmm(r.end_time),
+  hours: r.hours === null ? null : Number(r.hours),
+  backupEmployeeId: r.backup_employee_id,
+  attachmentPath: r.attachment_path,
   status: r.status,
   notes: r.notes,
   createdAt: r.created_at,
 });
 
-const fromLeave = (l: Leave) => ({
-  id: l.id,
-  employee_id: l.employeeId,
-  type: l.type,
-  start_date: l.startDate,
-  end_date: l.endDate,
-  status: l.status,
-  notes: l.notes,
-  created_at: l.createdAt,
-});
+const toHoliday = (r: HolidayRow): Holiday => ({ id: r.id, name: r.name, startDate: r.start_date, endDate: r.end_date });
 
-/** Converts the camelCase patch keys we use in the UI to column names. */
 function leavePatch(patch: Partial<Omit<Leave, "id">>) {
   const out: Database["public"]["Tables"]["leaves"]["Update"] = {};
   if (patch.employeeId !== undefined) out.employee_id = patch.employeeId;
   if (patch.type !== undefined) out.type = patch.type;
   if (patch.startDate !== undefined) out.start_date = patch.startDate;
   if (patch.endDate !== undefined) out.end_date = patch.endDate;
+  if (patch.durationType !== undefined) out.duration_type = patch.durationType;
+  if (patch.startTime !== undefined) out.start_time = patch.startTime;
+  if (patch.endTime !== undefined) out.end_time = patch.endTime;
+  if (patch.hours !== undefined) out.hours = patch.hours;
+  if (patch.backupEmployeeId !== undefined) out.backup_employee_id = patch.backupEmployeeId;
+  if (patch.attachmentPath !== undefined) out.attachment_path = patch.attachmentPath;
   if (patch.status !== undefined) out.status = patch.status;
   if (patch.notes !== undefined) out.notes = patch.notes;
   return out;
@@ -99,6 +102,8 @@ function employeePatch(patch: Partial<Omit<Employee, "id">>) {
   if (patch.department !== undefined) out.department = patch.department;
   if (patch.position !== undefined) out.position = patch.position;
   if (patch.active !== undefined) out.active = patch.active;
+  if (patch.role !== undefined) out.role = patch.role;
+  if (patch.annualAllowance !== undefined) out.annual_allowance = patch.annualAllowance;
   return out;
 }
 
@@ -106,22 +111,27 @@ function employeePatch(patch: Partial<Omit<Employee, "id">>) {
 // Errors
 // ---------------------------------------------------------------------------
 
-function describe(err: PostgrestError | Error | unknown): string {
-  const e = err as Partial<PostgrestError> & { message?: string };
+export function describe(err: PostgrestError | Error | unknown): string {
+  const e = err as Partial<PostgrestError> & { message?: string; statusCode?: string };
   switch (e.code) {
     case "23P01":
-      return "That person already has a non-rejected leave overlapping these dates.";
+      return e.message?.startsWith("Overlaps")
+        ? `${e.message}. Adjust the dates or reject the existing record first.`
+        : "That person already has a leave overlapping these dates.";
     case "23505":
       return "Another team member already uses this email.";
     case "23503":
       return "This record is referenced by other data and can't be removed.";
     case "23514":
-      return "The data was rejected by a validation rule (check the dates and fields).";
+      return e.message?.includes("admin") ? e.message : "The data was rejected by a validation rule (check the dates and fields).";
     case "PGRST205":
     case "42P01":
-      return "The database tables don't exist yet. Run supabase/migrations/20261020000000_init_team_leave.sql in the Supabase SQL Editor, then reload.";
+    case "42703":
+      return "The database is missing the latest tables or columns. Run the SQL files in supabase/migrations in the Supabase SQL Editor, then reload.";
     case "42501":
-      return "Permission denied by Supabase row level security. Check the policies in the migration.";
+      return e.message && !e.message.startsWith("permission denied") && !e.message.startsWith("new row violates")
+        ? e.message
+        : "You don't have permission to do that.";
   }
   if (e.message?.includes("Failed to fetch")) return "Can't reach Supabase. Check your internet connection.";
   return e.message ?? "Unexpected error";
@@ -147,27 +157,44 @@ async function fetchAll<T>(
   }
 }
 
-async function fetchData(): Promise<AppData> {
+async function fetchData(userId: string): Promise<AppData | null> {
   const sb = getSupabase();
-  const [employees, leaves, settings] = await Promise.all([
+  const [employees, leaves, settings, holidays, directory] = await Promise.all([
     fetchAll<EmployeeRow>((a, b) => sb.from("employees").select("*").order("name").range(a, b)),
     fetchAll<LeaveRow>((a, b) => sb.from("leaves").select("*").order("start_date").range(a, b)),
     sb.from("app_settings").select("*").eq("id", 1).maybeSingle().then(check),
+    sb.from("public_holidays").select("*").order("start_date").then(check),
+    sb.rpc("employee_directory").then(check),
   ]);
+  const me = employees.find((e) => e.user_id === userId && e.active);
+  if (!me) return null;
   return {
     employees: employees.map(toEmployee),
     leaves: leaves.map(toLeave),
-    settings: settings ? { weekendDays: settings.weekend_days } : DEFAULT_SETTINGS,
+    holidays: (holidays ?? []).map(toHoliday),
+    directory: directory ?? [],
+    me: toEmployee(me),
+    settings: settings
+      ? {
+          weekendDays: settings.weekend_days,
+          deductingTypes: settings.deducting_types as LeaveType[],
+          hoursPerDay: Number(settings.hours_per_day),
+        }
+      : DEFAULT_SETTINGS,
   };
 }
 
 let inflight: Promise<void> | null = null;
 
 export function reload(): Promise<void> {
+  const session = state.session;
+  if (!session) return Promise.resolve();
   if (inflight) return inflight;
   if (!state.data) setState({ status: "loading" });
-  inflight = fetchData()
-    .then((data) => setState({ status: "ready", data, error: null }))
+  inflight = fetchData(session.user.id)
+    .then((data) =>
+      data ? setState({ status: "ready", data, error: null }) : setState({ status: "unlinked", data: null, error: null }),
+    )
     .catch((err) => {
       // Keep showing existing data on a failed background refresh.
       if (state.data) setState({ notice: describe(err) });
@@ -179,9 +206,34 @@ export function reload(): Promise<void> {
   return inflight;
 }
 
+let authStarted = false;
+
+function startAuth() {
+  if (authStarted) return;
+  authStarted = true;
+  let sb: ReturnType<typeof getSupabase>;
+  try {
+    sb = getSupabase();
+  } catch (err) {
+    setState({ status: "error", error: describe(err) });
+    return;
+  }
+  setState({ status: "loading" });
+  sb.auth.onAuthStateChange((event, session) => {
+    const userChanged = session?.user.id !== state.session?.user.id;
+    if (!session) {
+      setState({ status: "signed-out", session: null, data: null, notice: null });
+      return;
+    }
+    setState({ session, ...(userChanged ? { data: null } : {}) });
+    // Avoid calling Supabase inside the callback itself (can deadlock the auth lock).
+    if (userChanged || event === "INITIAL_SESSION") setTimeout(reload, 0);
+  });
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  if (state.status === "idle") reload();
+  startAuth();
   // Pick up changes made by teammates when coming back to the tab.
   const onVisible = () => document.visibilityState === "visible" && state.status === "ready" && reload();
   document.addEventListener("visibilitychange", onVisible);
@@ -195,9 +247,27 @@ export function useStore(): StoreState {
   return useSyncExternalStore(subscribe, () => state, () => SERVER_STATE);
 }
 
-/** Returns null while loading (and during server render), then the data from Supabase. */
+/** Returns null until signed in and loaded, then the data visible to the current user. */
 export function useAppData(): AppData | null {
   return useStore().data;
+}
+
+// ---------------------------------------------------------------------------
+// Email notifications (best effort: failures never block the save)
+// ---------------------------------------------------------------------------
+
+function notify(leaveId: string, event: "submitted" | "decided") {
+  const token = state.session?.access_token;
+  if (!token) return;
+  fetch("/api/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ leaveId, event }),
+  })
+    .then(async (res) => {
+      if (!res.ok) console.warn("Notification failed:", await res.text());
+    })
+    .catch((err) => console.warn("Notification failed:", err));
 }
 
 // ---------------------------------------------------------------------------
@@ -218,153 +288,204 @@ function optimistic(fn: (d: AppData) => AppData, persist: () => PromiseLike<unkn
 
 const run = <T>(q: PromiseLike<{ data: T; error: PostgrestError | null }>) => Promise.resolve(q).then(check);
 
-async function replaceAll(data: AppData) {
-  const sb = getSupabase();
-  check(await sb.from("leaves").delete().not("id", "is", null));
-  check(await sb.from("employees").delete().not("id", "is", null));
-  for (let i = 0; i < data.employees.length; i += PAGE_SIZE)
-    check(await sb.from("employees").insert(data.employees.slice(i, i + PAGE_SIZE).map(fromEmployee), { defaultToNull: false }));
-  for (let i = 0; i < data.leaves.length; i += PAGE_SIZE)
-    check(await sb.from("leaves").insert(data.leaves.slice(i, i + PAGE_SIZE).map(fromLeave), { defaultToNull: false }));
-  check(await sb.from("app_settings").upsert({ id: 1, weekend_days: data.settings.weekendDays }));
+function attachmentPathFor(leaveId: string, file: File) {
+  const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-80);
+  return `${leaveId}/${Date.now()}-${safe}`;
 }
+
+async function uploadAttachment(leaveId: string, file: File, previous: string | null): Promise<string> {
+  const sb = getSupabase();
+  const path = attachmentPathFor(leaveId, file);
+  const up = await sb.storage.from(ATTACHMENT_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (up.error) throw new Error(`Attachment upload failed: ${up.error.message}`);
+  check(await sb.from("leaves").update({ attachment_path: path }).eq("id", leaveId));
+  if (previous) await sb.storage.from(ATTACHMENT_BUCKET).remove([previous]);
+  return path;
+}
+
+export type NewLeave = Omit<Leave, "id" | "createdAt" | "attachmentPath">;
 
 export const actions = {
   dismissNotice() {
     setState({ notice: null });
   },
-  addEmployee(input: Omit<Employee, "id" | "createdAt" | "active">) {
-    const employee: Employee = { ...input, id: crypto.randomUUID(), active: true, createdAt: new Date().toISOString() };
+
+  // ---- auth --------------------------------------------------------------
+  async signIn(email: string, password: string): Promise<string | null> {
+    const { error } = await getSupabase().auth.signInWithPassword({ email, password });
+    return error ? error.message : null;
+  },
+  async signUp(name: string, email: string, password: string): Promise<{ error: string | null; needsConfirmation: boolean }> {
+    const { data, error } = await getSupabase().auth.signUp({
+      email,
+      password,
+      options: { data: { name }, emailRedirectTo: window.location.origin },
+    });
+    return { error: error ? error.message : null, needsConfirmation: !error && !data.session };
+  },
+  async sendPasswordReset(email: string): Promise<string | null> {
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    return error ? error.message : null;
+  },
+  async signOut() {
+    await getSupabase().auth.signOut();
+  },
+
+  // ---- employees (admin) -------------------------------------------------
+  addEmployee(input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance">) {
+    const employee: Employee = {
+      ...input,
+      id: crypto.randomUUID(),
+      active: true,
+      userId: null,
+      createdAt: new Date().toISOString(),
+    };
     return optimistic(
       (d) => ({ ...d, employees: [...d.employees, employee] }),
-      () => run(getSupabase().from("employees").insert(fromEmployee(employee))),
+      async () => {
+        check(
+          await getSupabase().from("employees").insert({
+            id: employee.id,
+            name: employee.name,
+            email: employee.email,
+            department: employee.department,
+            position: employee.position,
+            role: employee.role,
+            annual_allowance: employee.annualAllowance,
+          }),
+        );
+        await reload(); // picks up an auto-linked account and the directory
+      },
     );
   },
   updateEmployee(id: string, patch: Partial<Omit<Employee, "id">>) {
     return optimistic(
       (d) => ({ ...d, employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) }),
-      () => run(getSupabase().from("employees").update(employeePatch(patch)).eq("id", id)),
+      async () => {
+        await run(getSupabase().from("employees").update(employeePatch(patch)).eq("id", id));
+        if (patch.email !== undefined || patch.active !== undefined || patch.name !== undefined) await reload();
+      },
     );
   },
-  addLeave(input: Omit<Leave, "id" | "createdAt">) {
-    const leave: Leave = { ...input, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+
+  // ---- leaves ------------------------------------------------------------
+  /** Creates a leave, uploads the optional attachment, then emails the team leads. */
+  addLeave(input: NewLeave, file?: File | null) {
+    const leave: Leave = { ...input, id: crypto.randomUUID(), attachmentPath: null, createdAt: new Date().toISOString() };
     return optimistic(
       (d) => ({ ...d, leaves: [...d.leaves, leave] }),
-      () => run(getSupabase().from("leaves").insert(fromLeave(leave))),
+      async () => {
+        check(
+          await getSupabase()
+            .from("leaves")
+            .insert({ id: leave.id, created_at: leave.createdAt, ...leavePatch(input) } as Database["public"]["Tables"]["leaves"]["Insert"]),
+        );
+        if (file) {
+          try {
+            const path = await uploadAttachment(leave.id, file, null);
+            if (state.data)
+              setState({
+                data: { ...state.data, leaves: state.data.leaves.map((l) => (l.id === leave.id ? { ...l, attachmentPath: path } : l)) },
+              });
+          } catch (err) {
+            // The request itself was saved; report the attachment problem without rolling back.
+            setState({ notice: `Leave saved, but ${describe(err).replace(/^Attachment/, "the attachment")}` });
+          }
+        }
+        if (input.status === "Pending") notify(leave.id, "submitted");
+      },
     );
   },
-  updateLeave(id: string, patch: Partial<Omit<Leave, "id">>) {
+  updateLeave(id: string, patch: Partial<Omit<Leave, "id">>, file?: File | null) {
+    const before = state.data?.leaves.find((l) => l.id === id);
     return optimistic(
       (d) => ({ ...d, leaves: d.leaves.map((l) => (l.id === id ? { ...l, ...patch } : l)) }),
-      () => run(getSupabase().from("leaves").update(leavePatch(patch)).eq("id", id)),
+      async () => {
+        await run(getSupabase().from("leaves").update(leavePatch(patch)).eq("id", id));
+        if (file) {
+          const path = await uploadAttachment(id, file, before?.attachmentPath ?? null);
+          if (state.data)
+            setState({ data: { ...state.data, leaves: state.data.leaves.map((l) => (l.id === id ? { ...l, attachmentPath: path } : l)) } });
+        }
+        if (patch.status && patch.status !== before?.status && patch.status !== "Pending") notify(id, "decided");
+      },
     );
   },
   deleteLeave(id: string) {
+    const path = state.data?.leaves.find((l) => l.id === id)?.attachmentPath;
     return optimistic(
       (d) => ({ ...d, leaves: d.leaves.filter((l) => l.id !== id) }),
-      () => run(getSupabase().from("leaves").delete().eq("id", id)),
+      async () => {
+        await run(getSupabase().from("leaves").delete().eq("id", id));
+        if (path) await getSupabase().storage.from(ATTACHMENT_BUCKET).remove([path]);
+      },
     );
   },
-  updateSettings(patch: Partial<Settings>) {
+  async removeAttachment(id: string) {
+    const path = state.data?.leaves.find((l) => l.id === id)?.attachmentPath;
+    if (!path) return true;
     return optimistic(
-      (d) => ({ ...d, settings: { ...d.settings, ...patch } }),
+      (d) => ({ ...d, leaves: d.leaves.map((l) => (l.id === id ? { ...l, attachmentPath: null } : l)) }),
+      async () => {
+        await run(getSupabase().from("leaves").update({ attachment_path: null }).eq("id", id));
+        await getSupabase().storage.from(ATTACHMENT_BUCKET).remove([path]);
+      },
+    );
+  },
+  /** Short-lived signed URL for viewing a private attachment. */
+  async attachmentUrl(path: string): Promise<string | null> {
+    const { data, error } = await getSupabase().storage.from(ATTACHMENT_BUCKET).createSignedUrl(path, 300);
+    if (error) {
+      setState({ notice: describe(error) });
+      return null;
+    }
+    return data.signedUrl;
+  },
+
+  // ---- settings & holidays (admin) --------------------------------------
+  updateSettings(patch: Partial<Settings>) {
+    const next = { ...(state.data?.settings ?? DEFAULT_SETTINGS), ...patch };
+    return optimistic(
+      (d) => ({ ...d, settings: next }),
       () =>
         run(
           getSupabase()
             .from("app_settings")
-            .upsert({ id: 1, weekend_days: patch.weekendDays ?? state.data?.settings.weekendDays ?? DEFAULT_SETTINGS.weekendDays }),
+            .update({ weekend_days: next.weekendDays, deducting_types: next.deductingTypes, hours_per_day: next.hoursPerDay })
+            .eq("id", 1),
         ),
     );
   },
-  /** Replaces ALL employees and leaves in the database. Not atomic: on failure, data is reloaded. */
-  importData(data: AppData) {
-    const next = { ...data, settings: { ...DEFAULT_SETTINGS, ...data.settings } };
-    return optimistic(() => next, () => replaceAll(next));
-  },
-  loadDemo() {
-    return actions.importData(demoData());
-  },
-  clearAll() {
+  addHoliday(input: Omit<Holiday, "id">) {
+    const holiday: Holiday = { ...input, id: crypto.randomUUID() };
     return optimistic(
-      (d) => ({ ...d, employees: [], leaves: [] }),
-      async () => {
-        const sb = getSupabase();
-        check(await sb.from("leaves").delete().not("id", "is", null));
-        check(await sb.from("employees").delete().not("id", "is", null));
-      },
+      (d) => ({ ...d, holidays: [...d.holidays, holiday].sort((a, b) => a.startDate.localeCompare(b.startDate)) }),
+      () =>
+        run(
+          getSupabase()
+            .from("public_holidays")
+            .insert({ id: holiday.id, name: holiday.name, start_date: holiday.startDate, end_date: holiday.endDate }),
+        ),
+    );
+  },
+  updateHoliday(id: string, input: Omit<Holiday, "id">) {
+    return optimistic(
+      (d) => ({ ...d, holidays: d.holidays.map((h) => (h.id === id ? { id, ...input } : h)) }),
+      () =>
+        run(
+          getSupabase()
+            .from("public_holidays")
+            .update({ name: input.name, start_date: input.startDate, end_date: input.endDate })
+            .eq("id", id),
+        ),
+    );
+  },
+  deleteHoliday(id: string) {
+    return optimistic(
+      (d) => ({ ...d, holidays: d.holidays.filter((h) => h.id !== id) }),
+      () => run(getSupabase().from("public_holidays").delete().eq("id", id)),
     );
   },
 };
 
-/** Data saved by the earlier localStorage-only version of the app in this browser, if any. */
-export function readLegacyLocalData(): AppData | null {
-  try {
-    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AppData>;
-    if (!Array.isArray(parsed.employees) || !Array.isArray(parsed.leaves)) return null;
-    return {
-      employees: parsed.employees,
-      leaves: parsed.leaves,
-      settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Sample team and leaves positioned around today so every screen has something to show. */
-function demoData(): AppData {
-  const now = new Date().toISOString();
-  const people: [string, string, string][] = [
-    ["Sara Hassan", "Engineering", "Frontend Engineer"],
-    ["Omar Khaled", "Engineering", "Backend Engineer"],
-    ["Mona Ali", "Engineering", "QA Engineer"],
-    ["Youssef Ibrahim", "Product", "Product Manager"],
-    ["Nour Mahmoud", "Design", "UX Designer"],
-    ["Karim Mostafa", "Engineering", "DevOps Engineer"],
-    ["Laila Samir", "Operations", "Team Coordinator"],
-  ];
-  const employees: Employee[] = people.map(([name, department, position], i) => ({
-    id: crypto.randomUUID(),
-    name,
-    email: name.toLowerCase().replace(" ", ".") + "@example.com",
-    department,
-    position,
-    active: i !== 6,
-    createdAt: now,
-  }));
-  const week = startOfWeek(todayISO(), 0);
-  const e = (i: number) => employees[i].id;
-  const leave = (
-    emp: number,
-    start: number,
-    len: number,
-    type: Leave["type"],
-    status: Leave["status"],
-    notes = "",
-  ): Leave => ({
-    id: crypto.randomUUID(),
-    employeeId: e(emp),
-    type,
-    startDate: addDays(week, start),
-    endDate: addDays(week, start + len - 1),
-    status,
-    notes,
-    createdAt: now,
-  });
-  const leaves: Leave[] = [
-    leave(0, -30, 5, "Annual", "Approved", "Family trip"),
-    leave(1, -21, 2, "Sick", "Approved", "Flu"),
-    leave(3, -12, 1, "Emergency", "Approved"),
-    leave(0, 1, 4, "Annual", "Approved", "Long weekend"),
-    leave(2, 2, 2, "Sick", "Approved", "Doctor's note provided"),
-    leave(4, 9, 5, "Annual", "Approved"),
-    leave(1, 10, 3, "Annual", "Pending", "Wedding"),
-    leave(5, 16, 3, "Annual", "Approved"),
-    leave(3, 30, 7, "Annual", "Pending", "Summer holiday"),
-    leave(2, 20, 1, "Emergency", "Rejected"),
-    leave(6, -50, 10, "Annual", "Approved"),
-  ];
-  return { employees, leaves, settings: DEFAULT_SETTINGS };
-}
+export const isAdmin = (data: AppData | null) => data?.me.role === "admin";

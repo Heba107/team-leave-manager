@@ -1,32 +1,37 @@
 "use client";
 
 import { useState } from "react";
-import type { Employee } from "@/lib/types";
+import type { Employee, Role } from "@/lib/types";
 import { Button, Field, inputClass } from "./ui";
 
-export type EmployeeInput = Pick<Employee, "name" | "email" | "department" | "position">;
+export type EmployeeInput = Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance">;
 
 export function EmployeeForm({
   initial,
   existing,
+  isSelf,
   onSubmit,
   onCancel,
 }: {
   initial?: Employee;
   existing: Employee[];
+  /** Editing your own record: role can't be changed (prevents locking yourself out). */
+  isSelf?: boolean;
   onSubmit: (input: EmployeeInput) => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = useState<EmployeeInput>({
+  const [form, setForm] = useState({
     name: initial?.name ?? "",
     email: initial?.email ?? "",
     department: initial?.department ?? "",
     position: initial?.position ?? "",
+    role: initial?.role ?? ("employee" as Role),
+    annualAllowance: String(initial?.annualAllowance ?? 21),
   });
-  const [errors, setErrors] = useState<Partial<Record<keyof EmployeeInput, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const departments = [...new Set(existing.map((e) => e.department).filter(Boolean))].sort();
 
-  const set = (k: keyof EmployeeInput) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   function submit(e: React.FormEvent) {
@@ -34,13 +39,25 @@ export function EmployeeForm({
     const next: typeof errors = {};
     const name = form.name.trim();
     const email = form.email.trim().toLowerCase();
+    const allowance = Number(form.annualAllowance);
     if (!name) next.name = "Name is required";
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) next.email = "Enter a valid email";
-    if (email && existing.some((x) => x.id !== initial?.id && x.email.toLowerCase() === email))
+    if (!email) next.email = "Email is required — it's how this person signs in";
+    else if (!/^\S+@\S+\.\S+$/.test(email)) next.email = "Enter a valid email";
+    else if (existing.some((x) => x.id !== initial?.id && x.email.toLowerCase() === email))
       next.email = "Another team member already uses this email";
+    if (form.annualAllowance === "" || !Number.isFinite(allowance) || allowance < 0 || allowance > 365)
+      next.annualAllowance = "Enter a number of days between 0 and 365";
+    else if (allowance * 2 !== Math.round(allowance * 2)) next.annualAllowance = "Use whole or half days";
     setErrors(next);
     if (Object.keys(next).length) return;
-    onSubmit({ name, email, department: form.department.trim(), position: form.position.trim() });
+    onSubmit({
+      name,
+      email,
+      department: form.department.trim(),
+      position: form.position.trim(),
+      role: form.role,
+      annualAllowance: allowance,
+    });
   }
 
   return (
@@ -48,8 +65,11 @@ export function EmployeeForm({
       <Field label="Full name *" error={errors.name}>
         <input className={inputClass} value={form.name} onChange={set("name")} autoFocus />
       </Field>
-      <Field label="Email" error={errors.email}>
+      <Field label="Work email *" error={errors.email}>
         <input className={inputClass} type="email" value={form.email} onChange={set("email")} />
+        <span className="mt-1 block text-xs text-zinc-500">
+          {initial?.userId ? "✓ Linked to a sign-in account." : "They sign up with this email to get access; it links automatically."}
+        </span>
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Department">
@@ -62,6 +82,18 @@ export function EmployeeForm({
         </Field>
         <Field label="Position">
           <input className={inputClass} value={form.position} onChange={set("position")} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Annual leave allowance (days) *" error={errors.annualAllowance}>
+          <input className={inputClass} type="number" min={0} max={365} step={0.5} value={form.annualAllowance} onChange={set("annualAllowance")} />
+        </Field>
+        <Field label="Role">
+          <select className={inputClass} value={form.role} onChange={set("role")} disabled={isSelf}>
+            <option value="employee">Employee</option>
+            <option value="admin">Admin (team lead)</option>
+          </select>
+          {isSelf && <span className="mt-1 block text-xs text-zinc-500">You can&apos;t change your own role.</span>}
         </Field>
       </div>
       <div className="flex justify-end gap-2 pt-2">

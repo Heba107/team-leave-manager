@@ -1,28 +1,59 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Button, Card, cx, Loading, Modal, PageHeader } from "@/components/ui";
-import { todayISO, WEEKDAY_NAMES } from "@/lib/dates";
-import { actions, LEGACY_STORAGE_KEY, readLegacyLocalData, reload, useAppData } from "@/lib/store";
-import type { AppData } from "@/lib/types";
+import { useState } from "react";
+import { Button, Card, cx, EmptyState, Field, inputClass, Loading, Modal, PageHeader } from "@/components/ui";
+import { formatDate, todayISO, WEEKDAY_NAMES } from "@/lib/dates";
+import { calendarDays } from "@/lib/leave";
+import { actions, reload, useAppData } from "@/lib/store";
+import type { Holiday, LeaveType } from "@/lib/types";
+import { LEAVE_TYPES } from "@/lib/types";
 
-type Pending = { kind: "clear" } | { kind: "replace"; data: AppData; source: string };
+/**
+ * Egypt's fixed-date official holidays. Islamic holidays (Eid al-Fitr, Eid al-Adha,
+ * Islamic New Year, Prophet's Birthday) follow the lunar calendar and must be added
+ * each year once the dates are announced.
+ */
+const EGYPT_FIXED: [string, string][] = [
+  ["01-07", "Coptic Christmas"],
+  ["01-25", "January 25 Revolution & Police Day"],
+  ["04-25", "Sinai Liberation Day"],
+  ["05-01", "Labour Day"],
+  ["06-30", "June 30 Revolution"],
+  ["07-23", "July 23 Revolution Day"],
+  ["10-06", "Armed Forces Day (6th of October)"],
+];
 
 export default function SettingsPage() {
   const data = useAppData();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [confirm, setConfirm] = useState<Pending | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Holiday | "new" | null>(null);
+  const [deleting, setDeleting] = useState<Holiday | null>(null);
+  const [yearFilter, setYearFilter] = useState<number | null>(null);
   const [message, setMessage] = useState("");
 
   if (!data) return <Loading />;
-  const { weekendDays } = data.settings;
-  const isEmpty = data.employees.length === 0 && data.leaves.length === 0;
-  const legacy = typeof window === "undefined" ? null : readLegacyLocalData();
+  const { settings, holidays } = data;
+  const thisYear = Number(todayISO().slice(0, 4));
+  const year = yearFilter ?? thisYear;
+  const yearHolidays = holidays.filter((h) => h.startDate.startsWith(String(year)) || h.endDate.startsWith(String(year)));
 
   function toggleDay(day: number) {
-    const next = weekendDays.includes(day) ? weekendDays.filter((d) => d !== day) : [...weekendDays, day].sort();
+    const next = settings.weekendDays.includes(day) ? settings.weekendDays.filter((d) => d !== day) : [...settings.weekendDays, day].sort();
     actions.updateSettings({ weekendDays: next });
+  }
+
+  function toggleDeducting(type: LeaveType) {
+    const next = settings.deductingTypes.includes(type)
+      ? settings.deductingTypes.filter((t) => t !== type)
+      : LEAVE_TYPES.filter((t) => t === type || settings.deductingTypes.includes(t));
+    actions.updateSettings({ deductingTypes: next });
+  }
+
+  async function addEgyptFixed() {
+    const missing = EGYPT_FIXED.map(([md, name]) => ({ date: `${year}-${md}`, name })).filter(
+      ({ date }) => !holidays.some((h) => h.startDate <= date && h.endDate >= date),
+    );
+    for (const m of missing) await actions.addHoliday({ name: m.name, startDate: m.date, endDate: m.date });
+    setMessage(missing.length ? `Added ${missing.length} holidays for ${year}.` : `All fixed-date holidays for ${year} are already listed.`);
   }
 
   function backup() {
@@ -35,92 +66,139 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function pickBackup(file: File) {
-    try {
-      const parsed = JSON.parse(await file.text()) as AppData;
-      if (!Array.isArray(parsed.employees) || !Array.isArray(parsed.leaves)) throw new Error("bad shape");
-      setConfirm({ kind: "replace", data: parsed, source: `the backup file "${file.name}"` });
-    } catch {
-      setMessage("That file is not a valid backup.");
-    }
-  }
-
-  async function confirmAction() {
-    if (!confirm) return;
-    setBusy(true);
-    const ok = confirm.kind === "clear" ? await actions.clearAll() : await actions.importData(confirm.data);
-    setBusy(false);
-    setConfirm(null);
-    if (!ok) return setMessage("");
-    if (confirm.kind === "clear") setMessage("All members and leave records were deleted.");
-    else {
-      setMessage(`Imported ${confirm.data.employees.length} members and ${confirm.data.leaves.length} leave records from ${confirm.source}.`);
-      if (confirm.source === "this browser's local storage") window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-    }
-  }
-
-  async function loadSample() {
-    setBusy(true);
-    const ok = await actions.loadDemo();
-    setBusy(false);
-    setMessage(ok ? "Sample team loaded." : "");
-  }
-
   return (
-    <div className="max-w-3xl">
-      <PageHeader title="Settings" description="Leave-day rules and data management." />
+    <div className="max-w-4xl">
+      <PageHeader title="Settings" description="Leave rules shared by the whole team. Only admins can change them." />
 
       <Card className="mb-6 p-5">
-        <h2 className="font-semibold">Weekend days</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          These days are skipped when calculating leave duration and statistics. A Sunday–Thursday week uses Friday + Saturday.
-          Shared by everyone using this database.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {WEEKDAY_NAMES.map((name, i) => (
-            <button
-              key={name}
-              onClick={() => toggleDay(i)}
-              className={cx(
-                "rounded-lg px-3 py-1.5 text-sm font-medium ring-1 ring-inset",
-                weekendDays.includes(i) ? "bg-indigo-600 text-white ring-indigo-600" : "bg-white text-zinc-700 ring-zinc-300 hover:bg-zinc-50",
-              )}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      {legacy && (legacy.employees.length > 0 || legacy.leaves.length > 0) && (
-        <Card className="mb-6 border-indigo-200 bg-indigo-50 p-5">
-          <h2 className="font-semibold text-indigo-950">Local data found in this browser</h2>
-          <p className="mt-1 text-sm text-indigo-900">
-            The previous version of the app saved {legacy.employees.length} members and {legacy.leaves.length} leave records in
-            this browser. You can copy them into Supabase.
-          </p>
-          <div className="mt-4 flex gap-2">
-            <Button onClick={() => setConfirm({ kind: "replace", data: legacy, source: "this browser's local storage" })}>
-              Import into Supabase
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="font-semibold">Public holidays</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Holidays are skipped when counting leave days, like weekends. Add multi-day holidays such as Eid as one range.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setYearFilter(year - 1)} aria-label="Previous year">
+              ←
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-                setMessage("Local browser data discarded.");
-              }}
-            >
-              Discard local data
+            <span className="w-12 text-center text-sm font-medium">{year}</span>
+            <Button size="sm" variant="secondary" onClick={() => setYearFilter(year + 1)} aria-label="Next year">
+              →
             </Button>
           </div>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg ring-1 ring-zinc-200">
+          {yearHolidays.length === 0 ? (
+            <EmptyState>No public holidays for {year} yet.</EmptyState>
+          ) : (
+            <table className="min-w-full text-sm">
+              <tbody className="divide-y divide-zinc-100">
+                {yearHolidays.map((h) => {
+                  const len = calendarDays(h.startDate, h.endDate);
+                  return (
+                    <tr key={h.id} className="hover:bg-zinc-50">
+                      <td className="px-4 py-2.5 font-medium text-zinc-900">{h.name}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-600">
+                        {formatDate(h.startDate)}
+                        {h.endDate !== h.startDate && ` → ${formatDate(h.endDate)}`}
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-500">{len === 1 ? "1 day" : `${len} days`}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(h)}>
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => setDeleting(h)}>
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setEditing("new")}>
+            + Add holiday
+          </Button>
+          <Button size="sm" variant="secondary" onClick={addEgyptFixed}>
+            Add Egypt&apos;s fixed-date holidays for {year}
+          </Button>
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          Eid al-Fitr, Eid al-Adha, Islamic New Year and the Prophet&apos;s Birthday move every year — add them once the official dates are
+          announced. If the government moves a holiday (e.g. to a Thursday), edit its date here.
+        </p>
+        {message && <p className="mt-2 text-sm text-zinc-600">{message}</p>}
+      </Card>
+
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card className="p-5">
+          <h2 className="font-semibold">Weekend days</h2>
+          <p className="mt-1 text-sm text-zinc-500">Skipped when counting leave days. A Sunday–Thursday week uses Friday + Saturday.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {WEEKDAY_NAMES.map((name, i) => (
+              <button
+                key={name}
+                onClick={() => toggleDay(i)}
+                className={cx(
+                  "rounded-lg px-3 py-1.5 text-sm font-medium ring-1 ring-inset",
+                  settings.weekendDays.includes(i) ? "bg-indigo-600 text-white ring-indigo-600" : "bg-white text-zinc-700 ring-zinc-300 hover:bg-zinc-50",
+                )}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
         </Card>
-      )}
+
+        <Card className="p-5">
+          <h2 className="font-semibold">Annual balance rules</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Leave types deducted from each employee&apos;s annual allowance (set per employee on the Employees page). Hourly permissions never
+            deduct days.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {LEAVE_TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => toggleDeducting(t)}
+                className={cx(
+                  "rounded-lg px-3 py-1.5 text-sm font-medium ring-1 ring-inset",
+                  settings.deductingTypes.includes(t) ? "bg-indigo-600 text-white ring-indigo-600" : "bg-white text-zinc-700 ring-zinc-300 hover:bg-zinc-50",
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 max-w-48">
+            <Field label="Working hours per day">
+              <input
+                type="number"
+                min={1}
+                max={24}
+                step={0.5}
+                className={inputClass}
+                defaultValue={settings.hoursPerDay}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v >= 1 && v <= 24 && v !== settings.hoursPerDay) actions.updateSettings({ hoursPerDay: v });
+                }}
+              />
+            </Field>
+            <p className="mt-1 text-xs text-zinc-500">Used to show permission hours as day-equivalents in reports.</p>
+          </div>
+        </Card>
+      </div>
 
       <Card className="p-5">
         <h2 className="font-semibold">Data</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Data is stored in Supabase ({data.employees.length} members, {data.leaves.length} leave records) and shared by everyone
-          using the app.
+          Stored in Supabase: {data.employees.length} members, {data.leaves.length} leave records, {holidays.length} holidays.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => reload()}>
@@ -129,55 +207,106 @@ export default function SettingsPage() {
           <Button variant="secondary" onClick={backup}>
             Download backup (JSON)
           </Button>
-          <Button variant="secondary" onClick={() => fileRef.current?.click()}>
-            Restore from backup
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) pickBackup(f);
-              e.target.value = "";
-            }}
-          />
-          {isEmpty && (
-            <Button variant="secondary" onClick={loadSample} disabled={busy}>
-              Load sample data
-            </Button>
-          )}
-          <Button variant="danger" onClick={() => setConfirm({ kind: "clear" })} disabled={isEmpty}>
-            Delete all data
-          </Button>
         </div>
-        {message && <p className="mt-3 text-sm text-zinc-600">{message}</p>}
       </Card>
 
-      <Modal
-        open={confirm !== null}
-        title={confirm?.kind === "clear" ? "Delete all data?" : "Replace all data?"}
-        onClose={() => !busy && setConfirm(null)}
-      >
-        {confirm && (
+      <Modal open={editing !== null} title={editing === "new" ? "Add public holiday" : "Edit public holiday"} onClose={() => setEditing(null)}>
+        {editing !== null && (
+          <HolidayForm
+            key={editing === "new" ? "new" : editing.id}
+            initial={editing === "new" ? undefined : editing}
+            defaultDate={todayISO().startsWith(String(year)) ? todayISO() : `${year}-01-01`}
+            onCancel={() => setEditing(null)}
+            onSubmit={(input) => {
+              if (editing === "new") actions.addHoliday(input);
+              else actions.updateHoliday(editing.id, input);
+              setEditing(null);
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal open={deleting !== null} title="Delete holiday?" onClose={() => setDeleting(null)}>
+        {deleting && (
           <div className="space-y-4 text-sm text-zinc-600">
             <p>
-              {confirm.kind === "clear"
-                ? "This permanently deletes every team member and leave record from the Supabase database, for everyone. Download a backup first if you want to keep them."
-                : `This deletes the ${data.employees.length} members and ${data.leaves.length} leave records currently in Supabase and replaces them with ${confirm.data.employees.length} members and ${confirm.data.leaves.length} leave records from ${confirm.source}.`}
+              <strong className="text-zinc-900">{deleting.name}</strong> will count as a normal working day again, which changes the duration
+              of any leave that covers it.
             </p>
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setConfirm(null)} disabled={busy}>
+              <Button variant="secondary" onClick={() => setDeleting(null)}>
                 Cancel
               </Button>
-              <Button variant="danger" onClick={confirmAction} disabled={busy}>
-                {busy ? "Working…" : confirm.kind === "clear" ? "Delete everything" : "Replace data"}
+              <Button
+                variant="danger"
+                onClick={() => {
+                  actions.deleteHoliday(deleting.id);
+                  setDeleting(null);
+                }}
+              >
+                Delete
               </Button>
             </div>
           </div>
         )}
       </Modal>
     </div>
+  );
+}
+
+function HolidayForm({
+  initial,
+  defaultDate,
+  onSubmit,
+  onCancel,
+}: {
+  initial?: Holiday;
+  defaultDate: string;
+  onSubmit: (input: Omit<Holiday, "id">) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [startDate, setStartDate] = useState(initial?.startDate ?? defaultDate);
+  const [endDate, setEndDate] = useState(initial?.endDate ?? defaultDate);
+  const [error, setError] = useState("");
+
+  return (
+    <form
+      className="space-y-4"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim()) return setError("Enter a name");
+        if (!startDate || !endDate || endDate < startDate) return setError("End date must be on or after the start date");
+        onSubmit({ name: name.trim(), startDate, endDate });
+      }}
+    >
+      <Field label="Name *">
+        <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Eid al-Fitr" autoFocus />
+      </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="From *">
+          <input
+            type="date"
+            className={inputClass}
+            value={startDate}
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              if (endDate < e.target.value) setEndDate(e.target.value);
+            }}
+          />
+        </Field>
+        <Field label="To *">
+          <input type="date" className={inputClass} value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} />
+        </Field>
+      </div>
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">{initial ? "Save changes" : "Add holiday"}</Button>
+      </div>
+    </form>
   );
 }

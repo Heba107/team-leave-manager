@@ -4,9 +4,22 @@ import { useState } from "react";
 import { Button, Card, cx, inputClass, Loading, PageHeader, StatCard, TypeBadge } from "@/components/ui";
 import { addMonths, endOfMonth, formatDate, formatMonth, startOfMonth, todayISO } from "@/lib/dates";
 import { exportCSV, exportExcel, type Cell } from "@/lib/export";
-import { approved, calendarDays, employeeStats, leaveDays, leaveDaysWithin, overlapsRange, totalsByType, TYPE_STYLES } from "@/lib/leave";
+import {
+  annualBalance,
+  approved,
+  calendarDays,
+  employeeStats,
+  formatDays,
+  formatHours,
+  leaveDays,
+  leaveDaysWithin,
+  leaveHours,
+  overlapsRange,
+  totalsByType,
+  TYPE_STYLES,
+} from "@/lib/leave";
 import { useAppData } from "@/lib/store";
-import { LEAVE_TYPES } from "@/lib/types";
+import { DURATION_LABELS, LEAVE_TYPES } from "@/lib/types";
 
 type PeriodKind = "month" | "year" | "custom";
 
@@ -20,6 +33,7 @@ export default function ReportsPage() {
 
   if (!data) return <Loading />;
   const { employees, leaves, settings } = data;
+  const cal = data;
   const today = todayISO();
 
   const month = monthAnchor ?? startOfMonth(today);
@@ -39,12 +53,15 @@ export default function ReportsPage() {
     label = `${formatDate(from)} – ${formatDate(to)}`;
   }
 
-  const stats = employeeStats(employees, leaves, from, to, settings)
-    .filter((s) => s.employee.active || s.occasions > 0)
+  const stats = employeeStats(employees, leaves, from, to, cal)
+    .filter((s) => s.employee.active || s.occasions > 0 || s.permissions > 0)
     .sort((a, b) => b.days - a.days || a.employee.name.localeCompare(b.employee.name));
   const byType = totalsByType(stats);
   const totalOccasions = stats.reduce((s, x) => s + x.occasions, 0);
   const totalDays = stats.reduce((s, x) => s + x.days, 0);
+  const totalPermissions = stats.reduce((s, x) => s + x.permissions, 0);
+  const totalHours = stats.reduce((s, x) => s + x.permissionHours, 0);
+  const balanceYear = Number(to.slice(0, 4));
   const membersWithLeave = stats.filter((s) => s.occasions > 0).length;
   const maxDays = Math.max(1, ...stats.map((s) => s.days));
   const periodLeaves = approved(leaves)
@@ -60,6 +77,8 @@ export default function ReportsPage() {
       "Total Occasions",
       "Total Days",
       ...LEAVE_TYPES.flatMap((t) => [`${t} Occasions`, `${t} Days`]),
+      "Permissions",
+      "Permission Hours",
     ],
     ...stats.map((s) => [
       s.employee.name,
@@ -68,20 +87,46 @@ export default function ReportsPage() {
       s.occasions,
       s.days,
       ...LEAVE_TYPES.flatMap((t) => [s.byType[t].occasions, s.byType[t].days]),
+      s.permissions,
+      s.permissionHours,
     ]),
-    ["TOTAL", "", "", totalOccasions, totalDays, ...LEAVE_TYPES.flatMap((t) => [byType[t].occasions, byType[t].days])],
+    [
+      "TOTAL",
+      "",
+      "",
+      totalOccasions,
+      totalDays,
+      ...LEAVE_TYPES.flatMap((t) => [byType[t].occasions, byType[t].days]),
+      totalPermissions,
+      totalHours,
+    ],
   ];
 
   const detailRows = (): Cell[][] => [
-    ["Employee", "Leave Type", "Start Date", "End Date", "Total Leave Days", "Days In Period", "Calendar Days", "Notes"],
+    [
+      "Employee",
+      "Leave Type",
+      "Duration Type",
+      "Start Date",
+      "End Date",
+      "Total Leave Days",
+      "Days In Period",
+      "Permission Hours",
+      "Calendar Days",
+      "Backup Person",
+      "Notes",
+    ],
     ...periodLeaves.map((l) => [
       employees.find((e) => e.id === l.employeeId)?.name ?? "Unknown",
       l.type,
+      DURATION_LABELS[l.durationType],
       l.startDate,
       l.endDate,
-      leaveDays(l, settings),
-      leaveDaysWithin(l, from, to, settings),
+      leaveDays(l, cal),
+      leaveDaysWithin(l, from, to, cal),
+      leaveHours(l),
       calendarDays(l.startDate, l.endDate),
+      l.backupEmployeeId ? (employees.find((e) => e.id === l.backupEmployeeId)?.name ?? "") : "",
       l.notes,
     ]),
   ];
@@ -90,6 +135,17 @@ export default function ReportsPage() {
     ["Leave Type", "Occasions", "Days"],
     ...LEAVE_TYPES.map((t) => [t, byType[t].occasions, byType[t].days]),
     ["TOTAL", totalOccasions, totalDays],
+  ];
+
+  const balanceRows = (): Cell[][] => [
+    ["Employee", "Department", "Status", "Annual Allowance", "Used (approved)", "Pending", "Remaining", "Permission Hours"],
+    ...employees
+      .filter((e) => e.active)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((e) => {
+        const b = annualBalance(e, leaves, balanceYear, cal);
+        return [e.name, e.department, e.active ? "Active" : "Inactive", b.allowance, b.used, b.pending, b.remaining, b.permissionHours];
+      }),
   ];
 
   const fileBase = `leave-report_${from}_to_${to}`;
@@ -110,6 +166,7 @@ export default function ReportsPage() {
                   { name: "Summary by Employee", rows: summaryRows() },
                   { name: "By Leave Type", rows: byTypeRows() },
                   { name: "Approved Leaves", rows: detailRows() },
+                  { name: `Balances ${balanceYear}`, rows: balanceRows() },
                 ])
               }
             >
@@ -177,15 +234,25 @@ export default function ReportsPage() {
             <strong>Occasions</strong> = number of separate approved leave records (a 5-day holiday is 1 occasion).
           </li>
           <li>
-            <strong>Days</strong> = working days actually taken; weekend days ({settings.weekendDays.length ? "configured in Settings" : "none configured"}) are not counted.
+            <strong>Days</strong> = working days actually taken; weekends and public holidays (configured in Settings) are not counted.
+            A half day counts as 0.5.
+          </li>
+          <li>
+            <strong>Hourly permissions (Ozon)</strong> are tracked as hours, separately — they are not occasions and never reduce the annual
+            balance.
           </li>
           <li>A leave that crosses the period boundary counts as 1 occasion, but only the days inside the period are counted.</li>
         </ul>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Leave occasions" value={totalOccasions} hint="Separate approved leave records" />
-        <StatCard label="Total leave days" value={totalDays} hint="Working days off in the period" />
+        <StatCard label="Total leave days" value={formatDays(totalDays)} hint="Working days off in the period" />
+        <StatCard
+          label="Permission hours"
+          value={formatHours(totalHours)}
+          hint={`${totalPermissions} hourly permission${totalPermissions === 1 ? "" : "s"} · ≈ ${formatDays(totalHours / (settings.hoursPerDay || 8))} day-equivalents`}
+        />
         <StatCard
           label="Avg. days per occasion"
           value={totalOccasions ? (totalDays / totalOccasions).toFixed(1) : "—"}
@@ -214,13 +281,13 @@ export default function ReportsPage() {
                     <TypeBadge type={t} />
                   </td>
                   <td className="px-5 py-2.5 text-right tabular-nums">{byType[t].occasions}</td>
-                  <td className="px-5 py-2.5 text-right tabular-nums">{byType[t].days}</td>
+                  <td className="px-5 py-2.5 text-right tabular-nums">{formatDays(byType[t].days)}</td>
                 </tr>
               ))}
               <tr className="bg-zinc-50 font-semibold">
                 <td className="px-5 py-2.5">Total</td>
                 <td className="px-5 py-2.5 text-right tabular-nums">{totalOccasions}</td>
-                <td className="px-5 py-2.5 text-right tabular-nums">{totalDays}</td>
+                <td className="px-5 py-2.5 text-right tabular-nums">{formatDays(totalDays)}</td>
               </tr>
             </tbody>
           </table>
@@ -257,6 +324,9 @@ export default function ReportsPage() {
                       {t}
                     </th>
                   ))}
+                  <th className="px-3 py-2 text-right font-medium" title="Hourly permissions">
+                    Hours
+                  </th>
                   <th className="w-40 px-4 py-2 font-medium" />
                 </tr>
               </thead>
@@ -268,12 +338,15 @@ export default function ReportsPage() {
                       {!s.employee.active && <span className="ml-1 text-xs text-zinc-400">(inactive)</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{s.occasions}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{s.days}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{formatDays(s.days)}</td>
                     {LEAVE_TYPES.map((t) => (
                       <td key={t} className="px-3 py-2.5 text-right tabular-nums text-zinc-500">
-                        {s.byType[t].occasions ? `${s.byType[t].occasions} / ${s.byType[t].days}d` : "—"}
+                        {s.byType[t].occasions ? `${s.byType[t].occasions} / ${formatDays(s.byType[t].days)}d` : "—"}
                       </td>
                     ))}
+                    <td className="px-3 py-2.5 text-right tabular-nums text-zinc-500">
+                      {s.permissionHours ? formatHours(s.permissionHours) : "—"}
+                    </td>
                     <td className="px-4 py-2.5">
                       <div className="flex h-2 overflow-hidden rounded-full bg-zinc-100">
                         {LEAVE_TYPES.map((t) => (
