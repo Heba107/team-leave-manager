@@ -32,6 +32,8 @@ type LeaveRow = {
   hours: number | null;
   backup_employee_id: string | null;
   attachment_path: string | null;
+  /** Calculated by the database (weekends and public holidays excluded); read-only for the app. */
+  leave_days: number | null;
   created_at: string;
 };
 
@@ -66,6 +68,7 @@ export interface Database {
           | "hours"
           | "backup_employee_id"
           | "attachment_path"
+          | "leave_days"
           | "created_at"
         >;
         Update: Partial<LeaveRow>;
@@ -108,6 +111,7 @@ export interface Database {
         Returns: { id: string; name: string; department: string }[];
       };
       leave_notification: { Args: { p_leave_id: string }; Returns: LeaveNotification | null };
+      compute_leave_days: { Args: { p_start: string; p_end: string; p_duration: string }; Returns: number };
     };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;

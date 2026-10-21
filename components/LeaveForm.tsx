@@ -271,8 +271,11 @@ export function LeaveForm({
               {formatDays(days)} leave day{days === 1 ? "" : "s"}
             </span>
           )}
-          {!partial && calDays > 0 && calDays !== workingDays && (
-            <span className="text-zinc-500"> ({calDays} calendar days; weekends{skippedHolidays.length ? " and public holidays" : ""} excluded)</span>
+          {!partial && calDays > 0 && (
+            <span className="text-zinc-500">
+              {" "}
+              ({calDays} calendar day{calDays === 1 ? "" : "s"}; weekends and public holidays excluded)
+            </span>
           )}
         </p>
         {!partial && skippedHolidays.length > 0 && <p className="text-xs text-zinc-500">Public holidays skipped: {skippedHolidays.join(", ")}</p>}
