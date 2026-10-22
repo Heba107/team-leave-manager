@@ -117,6 +117,10 @@ export interface Database {
         Returns: { id: string; name: string; department: string }[];
       };
       leave_notification: { Args: { p_leave_id: string }; Returns: LeaveNotification | null };
+      backup_conflict: {
+        Args: { p_backup: string; p_start: string; p_end: string };
+        Returns: { name: string; start_date: string; end_date: string; status: "Approved" | "Pending" } | null;
+      };
       compute_leave_days: { Args: { p_start: string; p_end: string; p_duration: string }; Returns: number };
     };
     Enums: Record<never, never>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { eachDay, formatDate, todayISO } from "@/lib/dates";
 import {
   annualBalance,
@@ -14,7 +14,7 @@ import {
   isWorkingDay,
   leaveDays,
 } from "@/lib/leave";
-import { actions, ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, type NewLeave } from "@/lib/store";
+import { actions, ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, type BackupConflict, type NewLeave } from "@/lib/store";
 import type { AppData, DurationType, Leave, LeaveStatus, LeaveType } from "@/lib/types";
 import { DURATION_LABELS, LEAVE_STATUSES, LEAVE_TYPES } from "@/lib/types";
 import { Button, cx, Field, inputClass } from "./ui";
@@ -108,16 +108,32 @@ export function LeaveForm({
   const checkable = !errors.endDate && !errors.startDate && form.employeeId && form.status !== "Rejected";
   const selfConflict = checkable ? findSelfConflict(candidate, data.leaves) : undefined;
   const teamOverlaps = checkable && !hourly ? findTeamOverlaps(candidate, data.leaves) : [];
-  const backupAway =
-    form.backupEmployeeId && checkable
-      ? data.leaves.find(
-          (l) =>
-            l.employeeId === form.backupEmployeeId &&
-            l.status !== "Rejected" &&
-            l.startDate <= effective.endDate &&
-            effective.startDate <= l.endDate,
-        )
-      : undefined;
+
+  // The backup must not be on (approved or pending) leave during these dates. Employees can't see
+  // colleagues' leave, so ask the database; it enforces the same rule when the request is saved.
+  const backupUnchanged =
+    !!initial &&
+    initial.backupEmployeeId === form.backupEmployeeId &&
+    initial.startDate === effective.startDate &&
+    initial.endDate === effective.endDate;
+  const backupKey =
+    form.backupEmployeeId && checkable && !backupUnchanged
+      ? `${form.backupEmployeeId}|${effective.startDate}|${effective.endDate}`
+      : null;
+  const [backupCheck, setBackupCheck] = useState<{ key: string; conflict: BackupConflict | null } | null>(null);
+  useEffect(() => {
+    if (!backupKey) return;
+    let live = true;
+    const [backup, start, end] = backupKey.split("|");
+    actions.backupConflict(backup, start, end).then((conflict) => live && setBackupCheck({ key: backupKey, conflict }));
+    return () => {
+      live = false;
+    };
+  }, [backupKey]);
+  const backupConflict = backupKey && backupCheck?.key === backupKey ? backupCheck.conflict : null;
+  const backupError = backupConflict
+    ? `${backupConflict.name} can't be your backup: they have ${backupConflict.status.toLowerCase()} leave from ${formatDate(backupConflict.start_date)} to ${formatDate(backupConflict.end_date)}. Choose someone else.`
+    : undefined;
 
   // Balance preview for leave types that are deducted from the annual allowance.
   const year = Number(effective.startDate.slice(0, 4));
@@ -133,10 +149,17 @@ export function LeaveForm({
     setFile(f);
   }
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
-    if (Object.keys(errors).length || selfConflict || fileError) return;
+    if (Object.keys(errors).length || selfConflict || fileError || backupError) return;
+    if (backupKey && backupCheck?.key !== backupKey) {
+      // The availability check hasn't come back yet: wait for it before submitting.
+      const [backup, start, end] = backupKey.split("|");
+      const conflict = await actions.backupConflict(backup, start, end);
+      setBackupCheck({ key: backupKey, conflict });
+      if (conflict) return;
+    }
     onSubmit({ ...effective, notes: form.notes.trim() }, form.type === "Sick" ? file : null);
   }
 
@@ -310,7 +333,7 @@ export function LeaveForm({
         </div>
       )}
 
-      <Field label="Backup / handover person" error={show("backup")}>
+      <Field label="Backup / handover person" error={show("backup") ?? backupError}>
         <select
           className={inputClass}
           value={form.backupEmployeeId ?? ""}
@@ -325,11 +348,6 @@ export function LeaveForm({
           ))}
         </select>
       </Field>
-      {backupAway && (
-        <p className="-mt-2 text-xs text-amber-700">
-          ⚠ {nameOf(backupAway.employeeId)} is also off {formatDate(backupAway.startDate)} → {formatDate(backupAway.endDate)}.
-        </p>
-      )}
 
       {form.type === "Sick" && (
         <Field label="Medical certificate (optional)" error={fileError}>

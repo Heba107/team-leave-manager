@@ -305,6 +305,7 @@ async function uploadAttachment(leaveId: string, file: File, previous: string | 
 }
 
 export type NewLeave = Omit<Leave, "id" | "createdAt" | "attachmentPath">;
+export type BackupConflict = Database["public"]["Functions"]["backup_conflict"]["Returns"] & {};
 
 export const actions = {
   dismissNotice() {
@@ -455,6 +456,11 @@ export const actions = {
         await getSupabase().storage.from(ATTACHMENT_BUCKET).remove([path]);
       },
     );
+  },
+  /** Approved/pending leave of `backupId` overlapping [start, end], or null if they're free. */
+  async backupConflict(backupId: string, start: string, end: string): Promise<BackupConflict | null> {
+    const { data, error } = await getSupabase().rpc("backup_conflict", { p_backup: backupId, p_start: start, p_end: end });
+    return error ? null : (data ?? null);
   },
   /** Short-lived signed URL for viewing a private attachment. */
   async attachmentUrl(path: string): Promise<string | null> {
