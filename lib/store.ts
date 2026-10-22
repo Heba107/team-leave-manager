@@ -14,7 +14,7 @@ export const ATTACHMENT_BUCKET = "leave-attachments";
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic"];
 
-const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8 };
+const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8, allowedSignupDomains: ["aman.eg"] };
 const PAGE_SIZE = 1000;
 
 export interface StoreState {
@@ -179,6 +179,7 @@ async function fetchData(userId: string): Promise<AppData | null> {
           weekendDays: settings.weekend_days,
           deductingTypes: settings.deducting_types as LeaveType[],
           hoursPerDay: Number(settings.hours_per_day),
+          allowedSignupDomains: settings.allowed_signup_domains ?? [],
         }
       : DEFAULT_SETTINGS,
   };
@@ -315,12 +316,35 @@ export const actions = {
     const { error } = await getSupabase().auth.signInWithPassword({ email, password });
     return error ? error.message : null;
   },
+  /**
+   * Creates the account through /api/signup (already confirmed, no email sent), then signs in.
+   * Falls back to Supabase's own sign-up if the server has no service key configured.
+   */
   async signUp(name: string, email: string, password: string): Promise<{ error: string | null; needsConfirmation: boolean }> {
+    let res: Response | null = null;
+    try {
+      res = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
+      });
+    } catch {
+      return { error: "Can't reach the server. Check your connection.", needsConfirmation: false };
+    }
+    const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+    if (res.ok) {
+      const error = await actions.signIn(email, password);
+      return { error, needsConfirmation: false };
+    }
+    if (body.code !== "not_configured") return { error: body.error ?? "Couldn't create the account.", needsConfirmation: false };
+
     const { data, error } = await getSupabase().auth.signUp({
       email,
       password,
       options: { data: { name }, emailRedirectTo: window.location.origin },
     });
+    if (error?.message.includes("Database error saving new user"))
+      return { error: "Couldn't create the account. Sign-ups are limited to company email addresses.", needsConfirmation: false };
     return { error: error ? error.message : null, needsConfirmation: !error && !data.session };
   },
   async sendPasswordReset(email: string): Promise<string | null> {
@@ -451,7 +475,12 @@ export const actions = {
         run(
           getSupabase()
             .from("app_settings")
-            .update({ weekend_days: next.weekendDays, deducting_types: next.deductingTypes, hours_per_day: next.hoursPerDay })
+            .update({
+              weekend_days: next.weekendDays,
+              deducting_types: next.deductingTypes,
+              hours_per_day: next.hoursPerDay,
+              allowed_signup_domains: next.allowedSignupDomains,
+            })
             .eq("id", 1),
         ),
     );

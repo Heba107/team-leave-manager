@@ -63,6 +63,8 @@ export interface Settings {
   deductingTypes: LeaveType[];
   /** Working hours per day, used to express permission hours as day-equivalents. */
   hoursPerDay: number;
+  /** Email domains allowed to create accounts (e.g. "aman.eg"); empty = any. */
+  allowedSignupDomains: string[];
 }
 
 /** Everything needed to turn a date range into a number of leave days. */

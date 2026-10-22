@@ -195,6 +195,32 @@ export default function SettingsPage() {
         </Card>
       </div>
 
+      <Card className="mb-6 p-5">
+        <h2 className="font-semibold">Who can sign up</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Email domains allowed to create an account, separated by commas. New accounts start as Employees. Leave empty to allow any
+          email address.
+        </p>
+        <div className="mt-4 max-w-md">
+          <input
+            className={inputClass}
+            defaultValue={settings.allowedSignupDomains.join(", ")}
+            placeholder="aman.eg"
+            onBlur={(e) => {
+              const next = [
+                ...new Set(
+                  e.target.value
+                    .split(/[,\s]+/)
+                    .map((d) => d.trim().replace(/^@/, "").toLowerCase())
+                    .filter(Boolean),
+                ),
+              ];
+              if (next.join() !== settings.allowedSignupDomains.join()) actions.updateSettings({ allowedSignupDomains: next });
+            }}
+          />
+        </div>
+      </Card>
+
       <Card className="p-5">
         <h2 className="font-semibold">Data</h2>
         <p className="mt-1 text-sm text-zinc-500">

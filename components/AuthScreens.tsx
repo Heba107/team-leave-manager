@@ -54,7 +54,7 @@ export function LoginScreen() {
             {mode === "signin" ? "Sign in to Team Leave" : mode === "signup" ? "Create your account" : "Reset your password"}
           </h1>
           {mode === "signup" && (
-            <p className="text-sm text-zinc-500">Use the work email your team lead registered for you.</p>
+            <p className="text-sm text-zinc-500">Use your @aman.eg work email. You&apos;ll get access as an employee right away.</p>
           )}
         </div>
         <Card className="p-6">
@@ -118,10 +118,10 @@ export function UnlinkedScreen({ email }: { email: string }) {
   return (
     <div className="flex min-h-screen w-full items-center justify-center px-4">
       <Card className="max-w-md p-6 text-sm text-zinc-600">
-        <h1 className="text-lg font-semibold text-zinc-900">Your account isn&apos;t linked to a team member yet</h1>
+        <h1 className="text-lg font-semibold text-zinc-900">Your access is turned off</h1>
         <p className="mt-2">
-          You&apos;re signed in as <strong className="text-zinc-900">{email}</strong>, but no active team member uses this email.
-          Ask your team lead to add you on the Employees page with exactly this email (or reactivate your profile), then reload.
+          You&apos;re signed in as <strong className="text-zinc-900">{email}</strong>, but your team member profile has been
+          deactivated. Ask your team lead to reactivate it on the Employees page, then reload.
         </p>
         <div className="mt-5 flex gap-2">
           <Button onClick={() => window.location.reload()}>Reload</Button>

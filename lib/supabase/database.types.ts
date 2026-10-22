@@ -39,7 +39,13 @@ type LeaveRow = {
 
 type HolidayRow = { id: string; name: string; start_date: string; end_date: string; created_at: string };
 
-type SettingsRow = { id: number; weekend_days: number[]; deducting_types: string[]; hours_per_day: number };
+type SettingsRow = {
+  id: number;
+  weekend_days: number[];
+  deducting_types: string[];
+  hours_per_day: number;
+  allowed_signup_domains: string[];
+};
 
 type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 

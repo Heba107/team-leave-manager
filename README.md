@@ -9,11 +9,15 @@ Next.js 16 + Supabase app for tracking team leave: requests and approvals, half 
 3. In the Supabase SQL Editor, run the files in `supabase/migrations/` **in order** (paste the whole file, nothing highlighted, Run).
 4. `npm run dev` and open http://localhost:3000.
 
-### First admin
+### Accounts and the first admin
 
-The first person to create an account becomes the **Admin**. If their email matches an existing team member, that record is promoted; otherwise one is created. After that, admins add team members (with their work email) on the Employees page, and each person signs up with that email to get access. Admins can promote others to Admin.
+Anyone can create an account from the login screen and gets access right away as an **Employee**: if an admin already added a team member with that email, the account is linked to it; otherwise a new team member record is created. The very first account, while no admin exists, becomes the **Admin**. Admins can promote others on the Employees page, and deactivating someone there removes their access.
 
-If Supabase's built-in email is used, confirmation emails only reach your project's team members and are rate limited. For a real team, either configure custom SMTP (Authentication → Emails → SMTP) or turn off "Confirm email" under Authentication → Providers → Email.
+Sign-ups go through `/api/signup`, which creates the account already confirmed with the Supabase admin API, so no confirmation email is sent and Supabase's email rate limit doesn't apply. This needs `SUPABASE_SERVICE_ROLE_KEY` on the server (see `.env.example`); without it the app falls back to Supabase's normal sign-up.
+
+Only email domains listed in Settings → **Who can sign up** may create accounts (default `aman.eg`). The database enforces this for every sign-up path, including Supabase's public sign-up endpoint.
+
+Because accounts aren't email-verified, someone could register a colleague's address before they do. Ask team members to create their accounts promptly, and check new names on the Employees page.
 
 ## Roles
 
