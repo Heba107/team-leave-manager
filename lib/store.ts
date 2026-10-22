@@ -317,37 +317,6 @@ export const actions = {
     const { error } = await getSupabase().auth.signInWithPassword({ email, password });
     return error ? error.message : null;
   },
-  /**
-   * Creates the account through /api/signup (already confirmed, no email sent), then signs in.
-   * Falls back to Supabase's own sign-up if the server has no service key configured.
-   */
-  async signUp(name: string, email: string, password: string): Promise<{ error: string | null; needsConfirmation: boolean }> {
-    let res: Response | null = null;
-    try {
-      res = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
-      });
-    } catch {
-      return { error: "Can't reach the server. Check your connection.", needsConfirmation: false };
-    }
-    const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
-    if (res.ok) {
-      const error = await actions.signIn(email, password);
-      return { error, needsConfirmation: false };
-    }
-    if (body.code !== "not_configured") return { error: body.error ?? "Couldn't create the account.", needsConfirmation: false };
-
-    const { data, error } = await getSupabase().auth.signUp({
-      email,
-      password,
-      options: { data: { name }, emailRedirectTo: window.location.origin },
-    });
-    if (error?.message.includes("Database error saving new user"))
-      return { error: "Couldn't create the account. Sign-ups are limited to company email addresses.", needsConfirmation: false };
-    return { error: error ? error.message : null, needsConfirmation: !error && !data.session };
-  },
   async sendPasswordReset(email: string): Promise<string | null> {
     const { error } = await getSupabase().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     return error ? error.message : null;

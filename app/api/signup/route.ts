@@ -8,9 +8,10 @@ import type { Database } from "@/lib/supabase/database.types";
  * confirmation email is sent (and Supabase's email rate limit never applies).
  * The browser then signs in with the same email and password.
  *
- * Requires SUPABASE_SERVICE_ROLE_KEY (server-only). Without it the route
- * answers 503 { code: "not_configured" } and the app falls back to Supabase's
- * normal sign-up.
+ * Requires SUPABASE_SERVICE_ROLE_KEY (server-only; set it in Vercel's
+ * environment variables too). Without it the route answers
+ * 503 { code: "not_configured" }. The app never falls back to Supabase's
+ * client-side sign-up, which would send confirmation emails.
  *
  * Allowed email domains come from app_settings.allowed_signup_domains; the
  * database trigger on auth.users enforces the same rule for every sign-up path.

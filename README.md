@@ -13,7 +13,7 @@ Next.js 16 + Supabase app for tracking team leave: requests and approvals, half 
 
 Anyone can create an account from the login screen and gets access right away as an **Employee**: if an admin already added a team member with that email, the account is linked to it; otherwise a new team member record is created. The very first account, while no admin exists, becomes the **Admin**. Admins can promote others on the Employees page, and deactivating someone there removes their access.
 
-Sign-ups go through `/api/signup`, which creates the account already confirmed with the Supabase admin API, so no confirmation email is sent and Supabase's email rate limit doesn't apply. This needs `SUPABASE_SERVICE_ROLE_KEY` on the server (see `.env.example`); without it the app falls back to Supabase's normal sign-up.
+Sign-ups go through `/api/signup`, which creates the account already confirmed with the Supabase admin API, so no confirmation email is sent and Supabase's email rate limit doesn't apply. This needs `SUPABASE_SERVICE_ROLE_KEY` on the server (see `.env.example`), including in your hosting provider's environment variables (Vercel: Project → Settings → Environment Variables, then redeploy). Without it, sign-up shows an error; the app never uses Supabase's client-side sign-up.
 
 Only email domains listed in Settings → **Who can sign up** may create accounts (default `aman.eg`). The database enforces this for every sign-up path, including Supabase's public sign-up endpoint.
 

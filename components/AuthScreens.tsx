@@ -6,6 +6,33 @@ import { Button, Card, Field, inputClass } from "./ui";
 
 type Mode = "signin" | "signup" | "reset";
 
+/**
+ * Creates an already-confirmed account through our /api/signup route (Supabase admin API,
+ * so no confirmation email and no email rate limit), then signs in with the same password.
+ * Returns an error message, or null once the user is signed in.
+ */
+async function signUp(name: string, email: string, password: string): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch("/api/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password }),
+    });
+  } catch {
+    return "Can't reach the server. Check your connection and try again.";
+  }
+  const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+  if (!res.ok) {
+    if (body.code === "not_configured")
+      return "Sign-up is temporarily unavailable (the server is missing its Supabase key). Please contact your team lead.";
+    return body.error ?? "Couldn't create the account. Please try again.";
+  }
+  // Signing in fires the auth listener in lib/store, which loads the app.
+  const err = await actions.signIn(email, password);
+  return err ? `Your account was created, but signing in failed: ${err}. Try signing in.` : null;
+}
+
 export function LoginScreen() {
   const [mode, setMode] = useState<Mode>("signin");
   const [name, setName] = useState("");
@@ -28,9 +55,8 @@ export function LoginScreen() {
       const err = await actions.signIn(addr, password);
       if (err) setError(err === "Invalid login credentials" ? "Wrong email or password." : err);
     } else if (mode === "signup") {
-      const res = await actions.signUp(name.trim(), addr, password);
-      if (res.error) setError(res.error);
-      else if (res.needsConfirmation) setInfo("Check your inbox and click the confirmation link, then sign in.");
+      const err = await signUp(name.trim(), addr, password);
+      if (err) setError(err);
     } else {
       const err = await actions.sendPasswordReset(addr);
       if (err) setError(err);
