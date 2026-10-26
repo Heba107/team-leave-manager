@@ -14,7 +14,15 @@ export const ATTACHMENT_BUCKET = "leave-attachments";
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic"];
 
-const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8, allowedSignupDomains: ["aman.eg"], generalManagerId: null };
+const DEFAULT_SETTINGS: Settings = {
+  weekendDays: [5, 6],
+  deductingTypes: ["Annual"],
+  hoursPerDay: 8,
+  allowedSignupDomains: ["aman.eg"],
+  generalManagerId: null,
+  carryForwardEnabled: true,
+  carryForwardFromYear: 2026,
+};
 const PAGE_SIZE = 1000;
 
 export interface StoreState {
@@ -183,6 +191,8 @@ async function fetchData(userId: string): Promise<AppData | null> {
           hoursPerDay: Number(settings.hours_per_day),
           allowedSignupDomains: settings.allowed_signup_domains ?? [],
           generalManagerId: settings.general_manager_id ?? null,
+          carryForwardEnabled: settings.carry_forward_enabled ?? true,
+          carryForwardFromYear: Number(settings.carry_forward_from_year ?? 2026),
         }
       : DEFAULT_SETTINGS,
   };
@@ -460,6 +470,8 @@ export const actions = {
               hours_per_day: next.hoursPerDay,
               allowed_signup_domains: next.allowedSignupDomains,
               general_manager_id: next.generalManagerId,
+              carry_forward_enabled: next.carryForwardEnabled,
+              carry_forward_from_year: next.carryForwardFromYear,
             })
             .eq("id", 1),
         ),

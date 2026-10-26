@@ -192,6 +192,43 @@ export default function SettingsPage() {
             </Field>
             <p className="mt-1 text-xs text-zinc-500">Used to show permission hours as day-equivalents in reports.</p>
           </div>
+          <div className="mt-5 border-t border-zinc-100 pt-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
+              <input
+                type="checkbox"
+                className="accent-indigo-600"
+                checked={settings.carryForwardEnabled}
+                onChange={(e) => actions.updateSettings({ carryForwardEnabled: e.target.checked })}
+              />
+              Carry unused days into the next year&apos;s first quarter
+            </label>
+            <p className="mt-1 text-xs text-zinc-500">
+              On 1 January each person&apos;s unused allowance from the previous year is added to their balance. Leave dated up to 31 March
+              uses those days first; whatever is left expires on 1 April.
+            </p>
+            {settings.carryForwardEnabled && (
+              <div className="mt-3 max-w-48">
+                <Field label="Carry over starting from year">
+                  <input
+                    type="number"
+                    min={2000}
+                    max={2100}
+                    className={inputClass}
+                    defaultValue={settings.carryForwardFromYear}
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isInteger(v) && v >= 2000 && v <= 2100 && v !== settings.carryForwardFromYear)
+                        actions.updateSettings({ carryForwardFromYear: v });
+                    }}
+                  />
+                </Field>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Unused {settings.carryForwardFromYear} days are available until 31 Mar {settings.carryForwardFromYear + 1}. Earlier years
+                  don&apos;t carry over.
+                </p>
+              </div>
+            )}
+          </div>
         </Card>
       </div>
 

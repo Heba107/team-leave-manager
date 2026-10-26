@@ -137,9 +137,15 @@ export function LeaveForm({
 
   // Balance preview for leave types that are deducted from the annual allowance.
   const year = Number(effective.startDate.slice(0, 4));
-  const balance = employee && year ? annualBalance(employee, data.leaves.filter((l) => l.id !== initial?.id), year, data) : null;
+  // Balance on the request's own dates: a Q1 request can still use carried-over days,
+  // and the request is charged to the year its dates fall in.
+  const others = data.leaves.filter((l) => l.id !== initial?.id);
+  const balance = employee && year ? annualBalance(employee, others, year, data, effective.startDate) : null;
   const deducts = data.settings.deductingTypes.includes(form.type) && !hourly;
-  const afterThis = balance ? balance.remaining - balance.pending - (deducts ? days : 0) : 0;
+  const afterThis =
+    employee && balance
+      ? annualBalance(employee, deducts ? [...others, { ...candidate, status: "Pending" }] : others, year, data, effective.startDate).available
+      : 0;
 
   function pickFile(f: File | null) {
     setFileError("");
@@ -304,8 +310,9 @@ export function LeaveForm({
         {!partial && skippedHolidays.length > 0 && <p className="text-xs text-zinc-500">Public holidays skipped: {skippedHolidays.join(", ")}</p>}
         {balance && deducts && (
           <p className={cx("text-xs", afterThis < 0 ? "font-medium text-rose-700" : "text-zinc-500")}>
-            {employee?.id === data.me.id ? "Your" : `${employee?.name}'s`} {year} annual balance: {formatDays(balance.remaining)} of{" "}
-            {formatDays(balance.allowance)} days left
+            {employee?.id === data.me.id ? "Your" : `${employee?.name}'s`} {year} annual balance: {formatDays(balance.remaining)} days left
+            {balance.carriedAvailable > 0 &&
+              ` (incl. ${formatDays(balance.carriedAvailable)} carried from ${year - 1}, used first, valid until ${formatDate(balance.carryExpiresOn)})`}
             {balance.pending > 0 && `, ${formatDays(balance.pending)} pending`} → {formatDays(afterThis)} after this request
             {afterThis < 0 && " (exceeds the allowance)"}
           </p>

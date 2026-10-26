@@ -47,6 +47,8 @@ type SettingsRow = {
   hours_per_day: number;
   allowed_signup_domains: string[];
   general_manager_id: string | null;
+  carry_forward_enabled: boolean;
+  carry_forward_from_year: number;
 };
 
 type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;

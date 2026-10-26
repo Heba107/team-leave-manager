@@ -69,6 +69,10 @@ export interface Settings {
   allowedSignupDomains: string[];
   /** Employee who receives every team lead's leave-request emails (and employees' too). */
   generalManagerId: string | null;
+  /** Carry unused annual days into the next year's Q1. */
+  carryForwardEnabled: boolean;
+  /** First year whose unused days carry over (earlier years weren't tracked). */
+  carryForwardFromYear: number;
 }
 
 /** Everything needed to turn a date range into a number of leave days. */

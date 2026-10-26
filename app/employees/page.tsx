@@ -75,10 +75,13 @@ export default function EmployeesPage() {
                   <th className="px-4 py-3 text-right" title="Annual leave allowance">
                     Allowance
                   </th>
+                  <th className="px-4 py-3 text-right" title={`Unused ${year - 1} days, usable for leave dated until 31 Mar ${year}`}>
+                    Carried
+                  </th>
                   <th className="px-4 py-3 text-right" title={`Approved ${data.settings.deductingTypes.join(" + ")} days in ${year}`}>
                     Used
                   </th>
-                  <th className="px-4 py-3 text-right" title="Allowance minus used (pending not yet deducted)">
+                  <th className="px-4 py-3 text-right" title="This year's allowance left + carried days still valid (pending not yet deducted)">
                     Remaining
                   </th>
                   <th className="px-4 py-3 text-right" title={`Approved hourly permissions in ${year}`}>
@@ -117,6 +120,18 @@ export default function EmployeesPage() {
                         </p>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{formatDays(b.allowance)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {b.carriedIn ? formatDays(b.carriedIn) : "—"}
+                        {b.carriedIn > 0 && (
+                          <span className="block text-xs text-zinc-400">
+                            {b.carriedExpired > 0
+                              ? `${formatDays(b.carriedExpired)} expired`
+                              : b.carriedAvailable > 0
+                                ? `${formatDays(b.carriedAvailable)} left`
+                                : "all used"}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right tabular-nums">
                         {formatDays(b.used)}
                         {b.pending > 0 && <span className="block text-xs text-zinc-400">+{formatDays(b.pending)} pending</span>}

@@ -49,8 +49,8 @@ function TeamDashboard({ data }: { data: AppData }) {
   const pending = leaves.filter((l) => l.status === "Pending").sort((a, b) => a.startDate.localeCompare(b.startDate));
   const lowBalance = activeMembers
     .map((e) => ({ e, b: annualBalance(e, leaves, year, data) }))
-    .filter(({ b }) => b.remaining - b.pending <= 3)
-    .sort((a, b) => a.b.remaining - b.b.remaining);
+    .filter(({ b }) => b.available <= 3)
+    .sort((a, b) => a.b.available - b.b.available);
   const holidayToday = holidayOn(today, data.holidays);
   const nextHoliday = data.holidays.find((h) => h.endDate >= today);
 
@@ -203,7 +203,8 @@ function TeamDashboard({ data }: { data: AppData }) {
                 <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
                   <span className="font-medium text-zinc-900">{e.name}</span>
                   <span className={cx("tabular-nums", b.remaining < 0 ? "font-semibold text-rose-700" : "text-zinc-600")}>
-                    {formatDays(b.remaining)} / {formatDays(b.allowance)} days left
+                    {formatDays(b.remaining)} days left
+                    {b.carriedAvailable > 0 && <span className="text-zinc-400"> (incl. {formatDays(b.carriedAvailable)} carried)</span>}
                     {b.pending > 0 && <span className="text-zinc-400"> · {formatDays(b.pending)} pending</span>}
                   </span>
                 </li>
@@ -243,8 +244,11 @@ function MyDashboard({ data }: { data: AppData }) {
   const recent = mine.filter((l) => l.endDate < today || l.status === "Rejected").slice(0, 8);
   const nameOf = (id: string) => data.directory.find((e) => e.id === id)?.name ?? "—";
   const nextHoliday = data.holidays.find((h) => h.endDate >= today);
-  const pct = balance.allowance ? Math.min(100, (balance.used / balance.allowance) * 100) : 0;
-  const pendingPct = balance.allowance ? Math.min(100 - pct, (balance.pending / balance.allowance) * 100) : 0;
+  // Bar scale: this year's allowance plus any days carried in from last year.
+  const total = balance.allowance + balance.carriedIn;
+  const pct = total ? Math.min(100, (balance.used / total) * 100) : 0;
+  const expiredPct = total ? Math.min(100 - pct, (balance.carriedExpired / total) * 100) : 0;
+  const pendingPct = total ? Math.min(100 - pct - expiredPct, (balance.pending / total) * 100) : 0;
 
   return (
     <div>
@@ -264,10 +268,16 @@ function MyDashboard({ data }: { data: AppData }) {
           value={
             <span className={balance.remaining < 0 ? "text-rose-700" : undefined}>
               {formatDays(balance.remaining)}
-              <span className="ml-1 text-base font-normal text-zinc-500">of {formatDays(balance.allowance)} days</span>
+              <span className="ml-1 text-base font-normal text-zinc-500">days</span>
             </span>
           }
-          hint={balance.pending ? `${formatDays(balance.pending)} more days pending approval` : "Approved leave only"}
+          hint={
+            balance.carriedAvailable > 0
+              ? `Includes ${formatDays(balance.carriedAvailable)} carried from ${year - 1}: use by ${formatDate(balance.carryExpiresOn)}`
+              : balance.pending
+                ? `${formatDays(balance.pending)} more days pending approval`
+                : `${formatDays(balance.allowance)}-day allowance for ${year}`
+          }
         />
         <StatCard label="Days used" value={formatDays(balance.used)} hint={`${data.settings.deductingTypes.join(" + ")} leave, approved`} />
         <StatCard label="Permission hours" value={formatHours(balance.permissionHours)} hint="Hourly permissions (Ozon) this year" />
@@ -281,13 +291,25 @@ function MyDashboard({ data }: { data: AppData }) {
       <Card className="mt-4 p-5">
         <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100">
           <div className="bg-indigo-600" style={{ width: `${pct}%` }} title={`Used: ${formatDays(balance.used)}`} />
+          <div className="bg-zinc-300" style={{ width: `${expiredPct}%` }} title={`Expired carried days: ${formatDays(balance.carriedExpired)}`} />
           <div className="pending-stripes bg-indigo-300" style={{ width: `${pendingPct}%` }} title={`Pending: ${formatDays(balance.pending)}`} />
         </div>
         <div className="mt-2 flex flex-wrap gap-4 text-xs text-zinc-500">
+          <span>
+            {formatDays(balance.allowance)} days for {year}
+            {balance.carriedIn > 0 && ` + ${formatDays(balance.carriedIn)} carried from ${year - 1}`}
+          </span>
           <span>■ Used {formatDays(balance.used)}</span>
+          {balance.carriedExpired > 0 && <span className="text-zinc-400">■ Expired {formatDays(balance.carriedExpired)} carried</span>}
           <span>▨ Pending {formatDays(balance.pending)}</span>
-          <span>□ Remaining after pending {formatDays(balance.remaining - balance.pending)}</span>
+          <span>□ Left after pending {formatDays(balance.available)}</span>
         </div>
+        {balance.carriedAvailable > 0 && (
+          <p className="mt-2 text-xs text-amber-700">
+            {formatDays(balance.carriedAvailable)} carried-over day{balance.carriedAvailable === 1 ? "" : "s"} expire after{" "}
+            {formatDate(balance.carryExpiresOn)}. Leave dated before then uses carried days first.
+          </p>
+        )}
       </Card>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">

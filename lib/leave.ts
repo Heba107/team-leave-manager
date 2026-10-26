@@ -1,4 +1,4 @@
-import { dayOfWeek, diffDays, eachDay, maxISO, minISO } from "./dates";
+import { dayOfWeek, diffDays, eachDay, maxISO, minISO, todayISO } from "./dates";
 import type { Calendar, DurationType, Employee, Holiday, Leave, LeaveType } from "./types";
 import { LEAVE_TYPES } from "./types";
 
@@ -212,35 +212,124 @@ export function totalsByType(stats: EmployeeStats[]) {
   return byType;
 }
 
+/** Carried-over days can only be used for leave dated up to this day of the year (end of Q1). */
+export const CARRY_EXPIRY_MMDD = "03-31";
+
 export interface Balance {
+  year: number;
+  /** Date the balance is calculated for (decides whether carried days are still valid). */
+  asOf: string;
   allowance: number;
-  /** Approved days of deducting types in the year. */
+  /** Unused days brought forward from the previous year on 1 January. */
+  carriedIn: number;
+  /** Carried days taken by approved leave dated in Q1. */
+  carriedUsed: number;
+  /** Carried days still usable (0 after the expiry date). */
+  carriedAvailable: number;
+  /** Carried days that lapsed unused after the expiry date. */
+  carriedExpired: number;
+  /** Last day carried days can be used, e.g. "2027-03-31". */
+  carryExpiresOn: string;
+  /** Approved days of deducting types dated in the year (carried + allowance). */
   used: number;
-  /** Pending days of deducting types in the year (not yet deducted). */
+  /** Part of `used` charged to this year's allowance. */
+  allowanceUsed: number;
+  /** Pending days of deducting types dated in the year (not yet deducted). */
   pending: number;
+  /** Days left now: this year's allowance not yet used + carried days still valid. */
   remaining: number;
+  /** `remaining` once every pending request is approved. */
+  available: number;
   permissionHours: number;
 }
 
-/** Annual balance for one employee in the calendar year `year`. Hourly permissions never deduct days. */
-export function annualBalance(employee: Employee, leaves: Leave[], year: number, cal: Calendar): Balance {
+interface YearUsage {
+  approved: number;
+  approvedQ1: number;
+  pending: number;
+  pendingQ1: number;
+  permissionHours: number;
+}
+
+/** Deducting days an employee's leaves use in `year`, split by Q1 (carry window) and status. */
+function yearUsage(employee: Employee, leaves: Leave[], year: number, cal: Calendar): YearUsage {
   const from = `${year}-01-01`;
+  const q1End = `${year}-${CARRY_EXPIRY_MMDD}`;
   const to = `${year}-12-31`;
-  let used = 0;
-  let pending = 0;
-  let permissionHours = 0;
+  const u: YearUsage = { approved: 0, approvedQ1: 0, pending: 0, pendingQ1: 0, permissionHours: 0 };
   for (const l of leaves) {
     if (l.employeeId !== employee.id || !overlapsRange(l, from, to) || l.status === "Rejected") continue;
     if (l.durationType === "hourly") {
-      if (l.status === "Approved") permissionHours += leaveHours(l);
+      if (l.status === "Approved") u.permissionHours += leaveHours(l);
       continue;
     }
     if (!cal.settings.deductingTypes.includes(l.type)) continue;
-    const d = leaveDaysWithin(l, from, to, cal);
-    if (l.status === "Approved") used += d;
-    else pending += d;
+    // Days are charged to the year — and the quarter — their dates fall in.
+    const days = leaveDaysWithin(l, from, to, cal);
+    const q1 = leaveDaysWithin(l, from, q1End, cal);
+    if (l.status === "Approved") {
+      u.approved += days;
+      u.approvedQ1 += q1;
+    } else {
+      u.pending += days;
+      u.pendingQ1 += q1;
+    }
   }
-  return { allowance: employee.annualAllowance, used, pending, remaining: employee.annualAllowance - used, permissionHours };
+  return u;
+}
+
+/** Unused days carried into `year` from the previous year (approved leave only). */
+export function carriedInto(employee: Employee, leaves: Leave[], year: number, cal: Calendar): number {
+  const { carryForwardEnabled, carryForwardFromYear } = cal.settings;
+  if (!carryForwardEnabled || year - 1 < carryForwardFromYear) return 0;
+  // What the previous year had available from its own allowance: carried days it
+  // received were used first in its Q1, and anything left of those expired.
+  const prevCarry = carriedInto(employee, leaves, year - 1, cal);
+  const prev = yearUsage(employee, leaves, year - 1, cal);
+  const prevAllowanceUsed = prev.approved - Math.min(prevCarry, prev.approvedQ1);
+  return Math.max(0, employee.annualAllowance - prevAllowanceUsed);
+}
+
+/**
+ * Annual balance for one employee in calendar year `year`, as of `asOf`
+ * (default: today within the current year, 1 Jan for future years, 31 Dec for past ones).
+ *
+ * Carry forward: unused days from the previous year arrive on 1 Jan, are used first by
+ * leave dated in Q1, and expire after 31 March. Hourly permissions never deduct days.
+ */
+export function annualBalance(employee: Employee, leaves: Leave[], year: number, cal: Calendar, asOf?: string): Balance {
+  const today = todayISO();
+  const date =
+    asOf ?? (today.startsWith(String(year)) ? today : String(year) > today.slice(0, 4) ? `${year}-01-01` : `${year}-12-31`);
+  const carryExpiresOn = `${year}-${CARRY_EXPIRY_MMDD}`;
+  const carryValid = date <= carryExpiresOn;
+
+  const u = yearUsage(employee, leaves, year, cal);
+  const carriedIn = carriedInto(employee, leaves, year, cal);
+  const carriedUsed = Math.min(carriedIn, u.approvedQ1);
+  const carriedLeft = carriedIn - carriedUsed;
+  const allowanceUsed = u.approved - carriedUsed;
+  const pendingFromCarry = Math.min(carriedLeft, u.pendingQ1);
+  const pendingFromAllowance = u.pending - pendingFromCarry;
+
+  const carriedAvailable = carryValid ? carriedLeft : 0;
+  const allowanceLeft = employee.annualAllowance - allowanceUsed;
+  return {
+    year,
+    asOf: date,
+    allowance: employee.annualAllowance,
+    carriedIn,
+    carriedUsed,
+    carriedAvailable,
+    carriedExpired: carryValid ? 0 : carriedLeft,
+    carryExpiresOn,
+    used: u.approved,
+    allowanceUsed,
+    pending: u.pending,
+    remaining: allowanceLeft + carriedAvailable,
+    available: allowanceLeft - pendingFromAllowance + (carryValid ? carriedLeft - pendingFromCarry : 0),
+    permissionHours: u.permissionHours,
+  };
 }
 
 export const TYPE_STYLES: Record<LeaveType, { chip: string; bar: string; dot: string }> = {

@@ -138,13 +138,41 @@ export default function ReportsPage() {
   ];
 
   const balanceRows = (): Cell[][] => [
-    ["Employee", "Department", "Status", "Annual Allowance", "Used (approved)", "Pending", "Remaining", "Permission Hours"],
+    [
+      "Employee",
+      "Department",
+      "Status",
+      "Annual Allowance",
+      `Carried from ${balanceYear - 1}`,
+      "Carried Used (Q1)",
+      "Carried Expired",
+      "Used (approved)",
+      "Used from Allowance",
+      "Pending",
+      "Remaining",
+      "Available after Pending",
+      "Permission Hours",
+    ],
     ...employees
       .filter((e) => e.active)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((e) => {
         const b = annualBalance(e, leaves, balanceYear, cal);
-        return [e.name, e.department, e.active ? "Active" : "Inactive", b.allowance, b.used, b.pending, b.remaining, b.permissionHours];
+        return [
+          e.name,
+          e.department,
+          e.active ? "Active" : "Inactive",
+          b.allowance,
+          b.carriedIn,
+          b.carriedUsed,
+          b.carriedExpired,
+          b.used,
+          b.allowanceUsed,
+          b.pending,
+          b.remaining,
+          b.available,
+          b.permissionHours,
+        ];
       }),
   ];
 
