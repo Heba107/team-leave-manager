@@ -110,6 +110,11 @@ export default function EmployeesPage() {
                       <td className="px-4 py-3">
                         {e.department || "—"}
                         {e.position && <p className="text-xs text-zinc-500">{e.position}</p>}
+                        <p className="text-xs text-zinc-500">
+                          {e.id === data.settings.generalManagerId
+                            ? "General Manager"
+                            : `Manager: ${employees.find((m) => m.id === e.managerId)?.name ?? "—"}`}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{formatDays(b.allowance)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">

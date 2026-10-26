@@ -196,6 +196,35 @@ export default function SettingsPage() {
       </div>
 
       <Card className="mb-6 p-5">
+        <h2 className="font-semibold">Leave request emails</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          A new request from an employee emails their direct manager (set on the Employees page) and the General Manager. A team
+          lead&apos;s own request emails the General Manager only. If neither is set, all other admins are emailed. Every admin can still
+          see and manage all requests.
+        </p>
+        <div className="mt-4 max-w-md">
+          <Field label="General Manager">
+            <select
+              className={inputClass}
+              value={settings.generalManagerId ?? ""}
+              onChange={(e) => actions.updateSettings({ generalManagerId: e.target.value || null })}
+            >
+              <option value="">Not set</option>
+              {data.employees
+                .filter((e) => e.active)
+                .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === "admin" ? -1 : 1))
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                    {e.email ? ` · ${e.email}` : " · no email"}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        </div>
+      </Card>
+
+      <Card className="mb-6 p-5">
         <h2 className="font-semibold">Who can sign up</h2>
         <p className="mt-1 text-sm text-zinc-500">
           Email domains allowed to create an account, separated by commas. New accounts start as Employees. Leave empty to allow any

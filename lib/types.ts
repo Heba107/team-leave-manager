@@ -22,6 +22,8 @@ export interface Employee {
   role: Role;
   /** Annual leave allowance in days. */
   annualAllowance: number;
+  /** Direct manager: receives this person's leave-request emails. */
+  managerId: string | null;
   /** Supabase Auth user linked to this employee (null until they sign up). */
   userId: string | null;
   createdAt: string;
@@ -65,6 +67,8 @@ export interface Settings {
   hoursPerDay: number;
   /** Email domains allowed to create accounts (e.g. "aman.eg"); empty = any. */
   allowedSignupDomains: string[];
+  /** Employee who receives every team lead's leave-request emails (and employees' too). */
+  generalManagerId: string | null;
 }
 
 /** Everything needed to turn a date range into a number of leave days. */

@@ -41,12 +41,17 @@ The rules are enforced by Postgres row-level security and triggers, not just the
 
 ## Email notifications
 
-Set `RESEND_API_KEY` (from [resend.com](https://resend.com)) and `NOTIFY_FROM_EMAIL` (a sender on a domain you've verified in Resend). Then:
+Configure either SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, e.g. an Office 365 mailbox) or Resend (`RESEND_API_KEY`), plus `NOTIFY_FROM_EMAIL`; see `.env.example`. Without either, the app works normally and skips sending.
 
-- a new **Pending** request emails all active admins;
-- approving or rejecting a request emails the employee.
+Who gets the email about a new **Pending** request:
 
-Without a key, the app works normally and skips sending.
+| Requester | Emailed |
+|---|---|
+| Employee | their **direct manager** (Employees page) + the **General Manager** (Settings) |
+| Team lead (admin) | the General Manager only |
+| Nobody found (no manager/GM set, or the GM's own request) | all other active admins |
+
+Approving or rejecting a request emails the employee. Emails only decide who is notified: every admin still sees and can manage every request.
 
 ## Attachments
 

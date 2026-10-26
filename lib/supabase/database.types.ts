@@ -14,6 +14,7 @@ type EmployeeRow = {
   active: boolean;
   role: "admin" | "employee";
   user_id: string | null;
+  manager_id: string | null;
   annual_allowance: number;
   created_at: string;
 };
@@ -45,6 +46,7 @@ type SettingsRow = {
   deducting_types: string[];
   hours_per_day: number;
   allowed_signup_domains: string[];
+  general_manager_id: string | null;
 };
 
 type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
@@ -56,7 +58,7 @@ export interface Database {
         Row: EmployeeRow;
         Insert: Optional<
           EmployeeRow,
-          "id" | "email" | "department" | "position" | "active" | "role" | "user_id" | "annual_allowance" | "created_at"
+          "id" | "email" | "department" | "position" | "active" | "role" | "user_id" | "manager_id" | "annual_allowance" | "created_at"
         >;
         Update: Partial<EmployeeRow>;
         Relationships: [];
@@ -145,5 +147,7 @@ export interface LeaveNotification {
   employee: { name: string; email: string };
   backup: string | null;
   caller_is_admin: boolean;
-  admins: { name: string; email: string }[];
+  /** employee: direct manager + General Manager; team_lead: General Manager; admin_fallback: other admins. */
+  recipient_rule: "employee" | "team_lead" | "admin_fallback";
+  recipients: { name: string; email: string; why: "direct_manager" | "general_manager" | "admin_fallback" }[];
 }

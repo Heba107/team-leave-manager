@@ -1,18 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
+import { sendEmail } from "@/lib/email";
 import type { Database, LeaveNotification } from "@/lib/supabase/database.types";
 
 /**
  * POST /api/notify  { leaveId, event: "submitted" | "decided" }
  * Authorization: Bearer <Supabase access token of the signed-in user>
  *
- * - submitted: emails all active admins (team leads) about a new Pending request.
- *   Allowed for the request's owner or an admin.
+ * - submitted: emails the people chosen by leave_notification() about a new
+ *   Pending request: an employee's direct manager + the General Manager, or only
+ *   the General Manager for a team lead's own request (falls back to the other
+ *   admins if neither is set). Allowed for the request's owner or an admin.
  * - decided:   emails the employee that their request was Approved / Rejected.
  *   Allowed for admins only.
  *
  * Who may see what is enforced by the database function leave_notification(),
- * which runs with the caller's own token. Emails are sent with Resend when
- * RESEND_API_KEY is set; otherwise the route reports what it would have sent.
+ * which runs with the caller's own token. Emails go out through SMTP or Resend
+ * (see lib/email.ts); if neither is configured the route reports what it would
+ * have sent.
  */
 export async function POST(request: Request) {
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -46,8 +50,8 @@ export async function POST(request: Request) {
 
   if (event === "submitted") {
     if (info.leave.status !== "Pending") return Response.json({ error: "Leave is not pending" }, { status: 409 });
-    const to = info.admins.map((a) => a.email).filter(Boolean);
-    if (!to.length) return Response.json({ sent: false, reason: "No admin has an email address" });
+    const to = [...new Set(info.recipients.map((r) => r.email).filter(Boolean))];
+    if (!to.length) return Response.json({ sent: false, reason: "No manager, General Manager or admin with an email address" });
     email = {
       to,
       subject: `New leave request: ${info.employee.name} – ${info.leave.type} (${dates(info)})`,
@@ -71,23 +75,10 @@ export async function POST(request: Request) {
     };
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return Response.json({ sent: false, reason: "Email is not configured (set RESEND_API_KEY)", preview: { to: email.to, subject: email.subject } });
-  }
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: process.env.NOTIFY_FROM_EMAIL || "Team Leave Manager <onboarding@resend.dev>",
-      to: email.to,
-      subject: email.subject,
-      html: email.html,
-    }),
-  });
-  if (!res.ok) return Response.json({ sent: false, error: `Email provider error: ${await res.text()}` }, { status: 502 });
-  return Response.json({ sent: true, to: email.to });
+  const result = await sendEmail(email);
+  const rule = event === "submitted" ? { rule: info.recipient_rule } : {};
+  if ("error" in result) return Response.json({ ...result, ...rule }, { status: 502 });
+  return Response.json({ ...result, ...rule });
 }
 
 function esc(s: string) {

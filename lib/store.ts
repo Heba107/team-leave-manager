@@ -14,7 +14,7 @@ export const ATTACHMENT_BUCKET = "leave-attachments";
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic"];
 
-const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8, allowedSignupDomains: ["aman.eg"] };
+const DEFAULT_SETTINGS: Settings = { weekendDays: [5, 6], deductingTypes: ["Annual"], hoursPerDay: 8, allowedSignupDomains: ["aman.eg"], generalManagerId: null };
 const PAGE_SIZE = 1000;
 
 export interface StoreState {
@@ -53,6 +53,7 @@ const toEmployee = (r: EmployeeRow): Employee => ({
   active: r.active,
   role: r.role,
   annualAllowance: Number(r.annual_allowance),
+  managerId: r.manager_id,
   userId: r.user_id,
   createdAt: r.created_at,
 });
@@ -104,6 +105,7 @@ function employeePatch(patch: Partial<Omit<Employee, "id">>) {
   if (patch.active !== undefined) out.active = patch.active;
   if (patch.role !== undefined) out.role = patch.role;
   if (patch.annualAllowance !== undefined) out.annual_allowance = patch.annualAllowance;
+  if (patch.managerId !== undefined) out.manager_id = patch.managerId;
   return out;
 }
 
@@ -180,6 +182,7 @@ async function fetchData(userId: string): Promise<AppData | null> {
           deductingTypes: settings.deducting_types as LeaveType[],
           hoursPerDay: Number(settings.hours_per_day),
           allowedSignupDomains: settings.allowed_signup_domains ?? [],
+          generalManagerId: settings.general_manager_id ?? null,
         }
       : DEFAULT_SETTINGS,
   };
@@ -326,7 +329,7 @@ export const actions = {
   },
 
   // ---- employees (admin) -------------------------------------------------
-  addEmployee(input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance">) {
+  addEmployee(input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId">) {
     const employee: Employee = {
       ...input,
       id: crypto.randomUUID(),
@@ -346,6 +349,7 @@ export const actions = {
             position: employee.position,
             role: employee.role,
             annual_allowance: employee.annualAllowance,
+            manager_id: employee.managerId,
           }),
         );
         await reload(); // picks up an auto-linked account and the directory
@@ -455,6 +459,7 @@ export const actions = {
               deducting_types: next.deductingTypes,
               hours_per_day: next.hoursPerDay,
               allowed_signup_domains: next.allowedSignupDomains,
+              general_manager_id: next.generalManagerId,
             })
             .eq("id", 1),
         ),

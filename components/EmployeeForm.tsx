@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Employee, Role } from "@/lib/types";
 import { Button, Field, inputClass } from "./ui";
 
-export type EmployeeInput = Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance">;
+export type EmployeeInput = Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId">;
 
 export function EmployeeForm({
   initial,
@@ -27,9 +27,14 @@ export function EmployeeForm({
     position: initial?.position ?? "",
     role: initial?.role ?? ("employee" as Role),
     annualAllowance: String(initial?.annualAllowance ?? 21),
+    managerId: initial?.managerId ?? "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const departments = [...new Set(existing.map((e) => e.department).filter(Boolean))].sort();
+  // Anyone active except this person; admins (team leads) first.
+  const managers = existing
+    .filter((e) => e.active && e.id !== initial?.id)
+    .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === "admin" ? -1 : 1));
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -57,6 +62,7 @@ export function EmployeeForm({
       position: form.position.trim(),
       role: form.role,
       annualAllowance: allowance,
+      managerId: form.managerId || null,
     });
   }
 
@@ -96,6 +102,21 @@ export function EmployeeForm({
           {isSelf && <span className="mt-1 block text-xs text-zinc-500">You can&apos;t change your own role.</span>}
         </Field>
       </div>
+      <Field label="Direct manager">
+        <select className={inputClass} value={form.managerId} onChange={set("managerId")}>
+          <option value="">None</option>
+          {managers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.role === "admin" ? " (team lead)" : ""}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block text-xs text-zinc-500">
+          Gets an email when this person requests leave, together with the General Manager. Team leads&apos; requests go to the General
+          Manager only. All admins still see every request.
+        </span>
+      </Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onCancel}>
           Cancel
