@@ -340,8 +340,9 @@ export const actions = {
     return error ? error.message : null;
   },
   /**
-   * Asks /api/password-reset to have Supabase email a reset link that opens /reset-password.
-   * Falls back to calling Supabase from the browser if the route isn't configured.
+   * Asks /api/password-reset to email a reset link that opens /reset-password. The link
+   * is created with the Supabase admin API and sent by the app's email service, so
+   * Supabase's own mailer and its rate limits are never involved.
    * Returns an error message to show, or null.
    */
   async sendPasswordReset(email: string): Promise<string | null> {
@@ -352,23 +353,13 @@ export const actions = {
         body: JSON.stringify({ email }),
       });
       if (res.ok) return null;
-      const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
-      if (body.code !== "not_configured") {
-        console.error("Password reset failed:", res.status, body);
-        return body.error ?? "Couldn't send the reset email. Please try again.";
-      }
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      console.error("Password reset failed:", res.status, body);
+      return body.error ?? "Couldn't send the reset email. Please try again.";
     } catch (err) {
       console.error("Password reset request failed:", err);
+      return "Can't reach the server. Check your connection and try again.";
     }
-    const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (!error) return null;
-    console.error("Supabase resetPasswordForEmail failed:", error);
-    if (/sending recovery email/i.test(error.message))
-      return "The reset email couldn't be sent: the email service isn't set up correctly. Please contact your team lead.";
-    if (/rate limit/i.test(error.message)) return "Too many reset emails were requested. Please wait a while and try again.";
-    return error.message;
   },
   async signOut() {
     await getSupabase().auth.signOut();

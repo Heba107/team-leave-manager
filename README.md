@@ -21,7 +21,7 @@ Because accounts aren't email-verified, someone could register a colleague's add
 
 ### Password reset
 
-"Forgot password?" calls `/api/password-reset`, which asks Supabase Auth (`resetPasswordForEmail`) to email a reset link that opens `APP_URL/reset-password`, where the person chooses a new password. The email is sent by **Supabase**, so set up custom SMTP in Supabase (Authentication → Emails → SMTP Settings). With Resend that's host `smtp.resend.com`, port `465`, user `resend`, and your Resend API key as the password; the sender must be on a domain verified in Resend. Set `APP_URL` to the app's public address.
+"Forgot password?" calls `/api/password-reset`, which creates a one-time recovery link with the Supabase admin API (`generateLink`, using `SUPABASE_SERVICE_ROLE_KEY`) and emails it through the app's email service. Supabase sends nothing, so its email rate limits don't apply and any number of people can reset at once. The link opens `APP_URL/reset-password`, works in any browser, works once, and expires after 1 hour. Repeat requests for the same address are limited to one a minute.
 
 In Supabase → Authentication → URL Configuration, set **Site URL** to your production URL and add `https://<your-domain>/reset-password` and `http://localhost:3000/reset-password` to **Redirect URLs**.
 
@@ -51,6 +51,11 @@ The rules are enforced by Postgres row-level security and triggers, not just the
 ## Email notifications
 
 Configure either SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, e.g. an Office 365 mailbox) or Resend (`RESEND_API_KEY`), plus `NOTIFY_FROM_EMAIL`; see `.env.example`. Without either, the app works normally and skips sending.
+
+Sending never crashes a request; problems are logged on the server as `[email] …` lines in plain language. With Resend:
+
+- If `NOTIFY_FROM_EMAIL` is rejected (domain not verified, or not a valid address), the email is retried from `onboarding@resend.dev`.
+- **`onboarding@resend.dev` and any unverified Resend account only deliver to the Resend account owner's address.** In that testing mode each recipient is tried separately, so the owner still gets their copy and everyone else is logged as not delivered. To reach every manager, verify your domain (e.g. `aman.eg`) at resend.com/domains and set `NOTIFY_FROM_EMAIL` to an address on it.
 
 Who gets the email about a new **Pending** request:
 
