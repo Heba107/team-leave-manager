@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { isValidManager, managerOptions } from "@/lib/managers";
 import type { Employee, Role, Squad } from "@/lib/types";
 import { Button, Field, inputClass } from "./ui";
 
@@ -41,10 +42,13 @@ export function EmployeeForm({
   });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const departments = [...new Set(existing.map((e) => e.department).filter(Boolean))].sort();
-  // Anyone active except this person; admins (team leads) first.
-  const managers = existing
-    .filter((e) => e.active && e.id !== initial?.id)
-    .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === "admin" ? -1 : 1));
+  // Only admins (team leads / General Manager) can be direct managers.
+  const managers = managerOptions(existing, initial?.id);
+  // An older assignment to someone who isn't an admin (any more) stays visible so it isn't silently cleared.
+  const invalidCurrent =
+    initial?.managerId && !managers.some((m) => m.id === initial.managerId)
+      ? existing.find((e) => e.id === initial.managerId)
+      : undefined;
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -60,6 +64,8 @@ export function EmployeeForm({
     else if (!/^\S+@\S+\.\S+$/.test(email)) next.email = "Enter a valid email";
     else if (existing.some((x) => x.id !== initial?.id && x.email.toLowerCase() === email))
       next.email = "Another team member already uses this email";
+    if (!isValidManager(existing, form.managerId || null, initial?.id))
+      next.managerId = "Choose a team lead or admin as direct manager";
     if (form.annualAllowance === "" || !Number.isFinite(allowance) || allowance < 0 || allowance > 365)
       next.annualAllowance = "Enter a number of days between 0 and 365";
     else if (allowance * 2 !== Math.round(allowance * 2)) next.annualAllowance = "Use whole or half days";
@@ -148,15 +154,19 @@ export function EmployeeForm({
         </select>
         {squads.length === 0 && <span className="mt-1 block text-xs text-zinc-500">Create squads with “Manage squads” on the Employees page.</span>}
       </Field>
-      <Field label="Direct manager">
+      <Field label="Direct manager" error={errors.managerId}>
         <select className={inputClass} value={form.managerId} onChange={set("managerId")}>
           <option value="">None</option>
           {managers.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
-              {m.role === "admin" ? " (team lead)" : ""}
             </option>
           ))}
+          {invalidCurrent && (
+            <option value={invalidCurrent.id} disabled>
+              {invalidCurrent.name} (not an admin: choose someone else)
+            </option>
+          )}
         </select>
         <span className="mt-1 block text-xs text-zinc-500">
           Gets an email when this person requests leave, together with the General Manager. Team leads&apos; requests go to the General
