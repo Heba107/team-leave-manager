@@ -15,6 +15,7 @@ type EmployeeRow = {
   role: "admin" | "employee";
   user_id: string | null;
   manager_id: string | null;
+  opening_balance_2026: number | null;
   annual_allowance: number;
   created_at: string;
 };
@@ -60,7 +61,17 @@ export interface Database {
         Row: EmployeeRow;
         Insert: Optional<
           EmployeeRow,
-          "id" | "email" | "department" | "position" | "active" | "role" | "user_id" | "manager_id" | "annual_allowance" | "created_at"
+          | "id"
+          | "email"
+          | "department"
+          | "position"
+          | "active"
+          | "role"
+          | "user_id"
+          | "manager_id"
+          | "opening_balance_2026"
+          | "annual_allowance"
+          | "created_at"
         >;
         Update: Partial<EmployeeRow>;
         Relationships: [];

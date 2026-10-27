@@ -22,6 +22,11 @@ export interface Employee {
   role: Role;
   /** Annual leave allowance in days. */
   annualAllowance: number;
+  /**
+   * Days actually left in 2026 before any leave recorded in the app (the app was adopted in
+   * October 2026). Replaces the allowance as the 2026 starting balance; null = use the allowance.
+   */
+  openingBalance2026: number | null;
   /** Direct manager: receives this person's leave-request emails. */
   managerId: string | null;
   /** Supabase Auth user linked to this employee (null until they sign up). */

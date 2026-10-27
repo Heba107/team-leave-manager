@@ -119,7 +119,14 @@ export default function EmployeesPage() {
                             : `Manager: ${employees.find((m) => m.id === e.managerId)?.name ?? "—"}`}
                         </p>
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{formatDays(b.allowance)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatDays(b.allowance)}
+                        {b.fromOpeningBalance && (
+                          <span className="block text-xs text-zinc-400" title="2026 opening balance (set on this person's profile)">
+                            opening
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right tabular-nums">
                         {b.carriedIn ? formatDays(b.carriedIn) : "—"}
                         {b.carriedIn > 0 && (
@@ -191,6 +198,7 @@ export default function EmployeesPage() {
             initial={editing === "new" ? undefined : editing}
             existing={employees}
             isSelf={editing !== "new" && editing.id === me.id}
+            recorded2026={editing === "new" ? 0 : annualBalance(editing, leaves, 2026, data, "2026-12-31").used}
             onCancel={() => setEditing(null)}
             onSubmit={(input) => {
               if (editing === "new") actions.addEmployee(input);

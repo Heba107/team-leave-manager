@@ -215,11 +215,22 @@ export function totalsByType(stats: EmployeeStats[]) {
 /** Carried-over days can only be used for leave dated up to this day of the year (end of Q1). */
 export const CARRY_EXPIRY_MMDD = "03-31";
 
+/** Year whose starting balance can be overridden per person (the app was adopted in Oct 2026). */
+export const OPENING_BALANCE_YEAR = 2026;
+
+/** A person's own starting balance for `year`: the 2026 opening balance if set, else the allowance. */
+export function yearAllowance(employee: Employee, year: number): number {
+  return year === OPENING_BALANCE_YEAR && employee.openingBalance2026 != null ? employee.openingBalance2026 : employee.annualAllowance;
+}
+
 export interface Balance {
   year: number;
   /** Date the balance is calculated for (decides whether carried days are still valid). */
   asOf: string;
+  /** Starting balance for the year: the allowance, or the 2026 opening balance if one is set. */
   allowance: number;
+  /** True when `allowance` comes from the 2026 opening balance. */
+  fromOpeningBalance: boolean;
   /** Unused days brought forward from the previous year on 1 January. */
   carriedIn: number;
   /** Carried days taken by approved leave dated in Q1. */
@@ -287,7 +298,7 @@ export function carriedInto(employee: Employee, leaves: Leave[], year: number, c
   const prevCarry = carriedInto(employee, leaves, year - 1, cal);
   const prev = yearUsage(employee, leaves, year - 1, cal);
   const prevAllowanceUsed = prev.approved - Math.min(prevCarry, prev.approvedQ1);
-  return Math.max(0, employee.annualAllowance - prevAllowanceUsed);
+  return Math.max(0, yearAllowance(employee, year - 1) - prevAllowanceUsed);
 }
 
 /**
@@ -313,11 +324,13 @@ export function annualBalance(employee: Employee, leaves: Leave[], year: number,
   const pendingFromAllowance = u.pending - pendingFromCarry;
 
   const carriedAvailable = carryValid ? carriedLeft : 0;
-  const allowanceLeft = employee.annualAllowance - allowanceUsed;
+  const allowance = yearAllowance(employee, year);
+  const allowanceLeft = allowance - allowanceUsed;
   return {
     year,
     asOf: date,
-    allowance: employee.annualAllowance,
+    allowance,
+    fromOpeningBalance: year === OPENING_BALANCE_YEAR && employee.openingBalance2026 != null,
     carriedIn,
     carriedUsed,
     carriedAvailable,

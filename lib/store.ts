@@ -62,6 +62,7 @@ const toEmployee = (r: EmployeeRow): Employee => ({
   role: r.role,
   annualAllowance: Number(r.annual_allowance),
   managerId: r.manager_id,
+  openingBalance2026: r.opening_balance_2026 === null ? null : Number(r.opening_balance_2026),
   userId: r.user_id,
   createdAt: r.created_at,
 });
@@ -114,6 +115,7 @@ function employeePatch(patch: Partial<Omit<Employee, "id">>) {
   if (patch.role !== undefined) out.role = patch.role;
   if (patch.annualAllowance !== undefined) out.annual_allowance = patch.annualAllowance;
   if (patch.managerId !== undefined) out.manager_id = patch.managerId;
+  if (patch.openingBalance2026 !== undefined) out.opening_balance_2026 = patch.openingBalance2026;
   return out;
 }
 
@@ -339,7 +341,9 @@ export const actions = {
   },
 
   // ---- employees (admin) -------------------------------------------------
-  addEmployee(input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId">) {
+  addEmployee(
+    input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "openingBalance2026">,
+  ) {
     const employee: Employee = {
       ...input,
       id: crypto.randomUUID(),
@@ -360,6 +364,7 @@ export const actions = {
             role: employee.role,
             annual_allowance: employee.annualAllowance,
             manager_id: employee.managerId,
+            opening_balance_2026: employee.openingBalance2026,
           }),
         );
         await reload(); // picks up an auto-linked account and the directory

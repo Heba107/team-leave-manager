@@ -44,7 +44,7 @@ export default function SettingsPage() {
   function toggleDeducting(type: LeaveType) {
     const next = settings.deductingTypes.includes(type)
       ? settings.deductingTypes.filter((t) => t !== type)
-      : LEAVE_TYPES.filter((t) => t === type || settings.deductingTypes.includes(t));
+      : [...settings.deductingTypes, type];
     actions.updateSettings({ deductingTypes: next });
   }
 

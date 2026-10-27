@@ -4,12 +4,16 @@ import { useState } from "react";
 import type { Employee, Role } from "@/lib/types";
 import { Button, Field, inputClass } from "./ui";
 
-export type EmployeeInput = Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId">;
+export type EmployeeInput = Pick<
+  Employee,
+  "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "openingBalance2026"
+>;
 
 export function EmployeeForm({
   initial,
   existing,
   isSelf,
+  recorded2026 = 0,
   onSubmit,
   onCancel,
 }: {
@@ -17,6 +21,8 @@ export function EmployeeForm({
   existing: Employee[];
   /** Editing your own record: role can't be changed (prevents locking yourself out). */
   isSelf?: boolean;
+  /** Approved 2026 leave days (deducting types) already recorded in the app for this person. */
+  recorded2026?: number;
   onSubmit: (input: EmployeeInput) => void;
   onCancel: () => void;
 }) {
@@ -28,6 +34,7 @@ export function EmployeeForm({
     role: initial?.role ?? ("employee" as Role),
     annualAllowance: String(initial?.annualAllowance ?? 21),
     managerId: initial?.managerId ?? "",
+    openingBalance2026: initial?.openingBalance2026 == null ? "" : String(initial.openingBalance2026),
   });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const departments = [...new Set(existing.map((e) => e.department).filter(Boolean))].sort();
@@ -53,6 +60,10 @@ export function EmployeeForm({
     if (form.annualAllowance === "" || !Number.isFinite(allowance) || allowance < 0 || allowance > 365)
       next.annualAllowance = "Enter a number of days between 0 and 365";
     else if (allowance * 2 !== Math.round(allowance * 2)) next.annualAllowance = "Use whole or half days";
+    const opening = form.openingBalance2026.trim() === "" ? null : Number(form.openingBalance2026);
+    if (opening !== null && (!Number.isFinite(opening) || opening < 0 || opening > 365))
+      next.openingBalance2026 = "Enter a number of days between 0 and 365, or leave empty";
+    else if (opening !== null && opening * 2 !== Math.round(opening * 2)) next.openingBalance2026 = "Use whole or half days";
     setErrors(next);
     if (Object.keys(next).length) return;
     onSubmit({
@@ -63,6 +74,7 @@ export function EmployeeForm({
       role: form.role,
       annualAllowance: allowance,
       managerId: form.managerId || null,
+      openingBalance2026: form.openingBalance2026.trim() === "" ? null : Number(form.openingBalance2026),
     });
   }
 
@@ -102,6 +114,25 @@ export function EmployeeForm({
           {isSelf && <span className="mt-1 block text-xs text-zinc-500">You can&apos;t change your own role.</span>}
         </Field>
       </div>
+      <Field label="2026 opening balance (days)" error={errors.openingBalance2026}>
+        <input
+          className={inputClass}
+          type="number"
+          min={0}
+          max={365}
+          step={0.5}
+          placeholder={`Empty = full ${form.annualAllowance || 21}-day allowance`}
+          value={form.openingBalance2026}
+          onChange={set("openingBalance2026")}
+        />
+        <span className="mt-1 block text-xs text-zinc-500">
+          Days this person actually had left in 2026 before leave was tracked in this app.
+          {recorded2026 > 0
+            ? ` The ${recorded2026} day${recorded2026 === 1 ? "" : "s"} of 2026 leave already recorded here will be deducted from it.`
+            : " Leave recorded here from now on is deducted from it."}{" "}
+          What&apos;s left on 31 Dec carries into Q1 2027.
+        </span>
+      </Field>
       <Field label="Direct manager">
         <select className={inputClass} value={form.managerId} onChange={set("managerId")}>
           <option value="">None</option>

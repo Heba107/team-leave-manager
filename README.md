@@ -37,6 +37,8 @@ The rules are enforced by Postgres row-level security and triggers, not just the
 - **Hourly permissions (Ozon)** are tracked in hours, separately from days, and never reduce the annual balance.
 - **Annual balance** = allowance − approved days of the leave types chosen in Settings (default: Annual), per calendar year. Pending days are shown but not deducted. Leave is always charged to the year its dates fall in (a leave from 28 Dec to 3 Jan is split across both years).
 - **Carry forward** (Settings → Annual balance rules): on 1 January, each person's unused allowance from the previous year is added to their balance. Leave dated 1 Jan–31 Mar uses those carried days first; any carried days still unused expire on 1 April, leaving only the current year's allowance. Carrying starts from the year set in Settings (default 2026, so unused 2026 days are usable until 31 Mar 2027). Balances are worked out from leave dates, so nothing needs to run on 1 January or 1 April.
+- **2026 opening balance** (Employees → Edit): because the app was adopted in October 2026, admins can enter the days each person actually had left in 2026 before leave was tracked here. It replaces the allowance as their 2026 starting balance; 2026 leave recorded in the app is deducted from it, and the rest carries into Q1 2027. Leave it empty to use the normal allowance.
+- **Approvals:** any admin can approve or reject any request, including their own. Team leads don't need the General Manager's approval.
 - **Statistics** count approved records only. Occasions = number of records; days = working days inside the period.
 - One person can't have overlapping requests, except two partial-day records on the same day (e.g. morning half-day plus an afternoon permission).
 
