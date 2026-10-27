@@ -12,8 +12,15 @@ const LINKS = [
   { href: "/calendar", label: "Calendar", icon: "📅", adminOnly: false },
   { href: "/employees", label: "Employees", icon: "👥", adminOnly: true },
   { href: "/reports", label: "Statistics & Export", icon: "📊", adminOnly: true },
-  { href: "/settings", label: "Settings", icon: "⚙", adminOnly: true },
+  { href: "/settings", label: "Team Settings", icon: "⚙", adminOnly: true },
+  { href: "/account", label: "My Account", icon: "👤", adminOnly: false },
 ];
+
+/** "Sarah Hasan" → "SH" */
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
+}
 
 export function Nav() {
   const pathname = usePathname();
@@ -47,10 +54,20 @@ export function Nav() {
 
   const user = data && (
     <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-50 px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-zinc-900">{data.me.name}</p>
-        <p className="text-xs text-zinc-500">{admin ? "Admin · Team lead" : "Employee"}</p>
-      </div>
+      <Link
+        href="/account"
+        onClick={() => setOpen(false)}
+        title="My account: profile and password"
+        className="flex min-w-0 items-center gap-2 rounded-md hover:opacity-80"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
+          {initials(data.me.name)}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-zinc-900">{data.me.name}</span>
+          <span className="block text-xs text-zinc-500">{admin ? "Admin · Team lead" : "Employee"}</span>
+        </span>
+      </Link>
       <button onClick={() => actions.signOut()} className="shrink-0 text-xs font-medium text-zinc-500 hover:text-zinc-900">
         Sign out
       </button>
@@ -73,13 +90,24 @@ export function Nav() {
       </aside>
       <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 lg:hidden">
         {brand}
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100"
-          aria-label="Toggle navigation"
-        >
-          ☰
-        </button>
+        <div className="flex items-center gap-1">
+          {data && (
+            <Link
+              href="/account"
+              aria-label="My account"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700"
+            >
+              {initials(data.me.name)}
+            </Link>
+          )}
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100"
+            aria-label="Toggle navigation"
+          >
+            ☰
+          </button>
+        </div>
       </header>
       {open && (
         <div className="space-y-3 border-b border-zinc-200 bg-white px-4 py-3 lg:hidden">

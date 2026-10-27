@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { LoginScreen, UnlinkedScreen } from "./AuthScreens";
 import { Nav } from "./Nav";
-import { Card, Loading, SyncNotice } from "./ui";
+import { Card, Loading, SyncNotice, Toaster } from "./ui";
 
 /** Pages only admins (team leads) can open. The database enforces the same rules. */
 const ADMIN_ONLY = ["/employees", "/reports", "/settings"];
@@ -39,6 +39,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           children
         )}
       </main>
+      <Toaster />
     </>
   );
 }

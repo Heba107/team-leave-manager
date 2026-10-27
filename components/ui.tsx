@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { STATUS_STYLES, TYPE_STYLES } from "@/lib/leave";
 import { actions, reload, useStore } from "@/lib/store";
 import type { LeaveStatus, LeaveType } from "@/lib/types";
@@ -184,6 +184,76 @@ export function SyncNotice() {
       <button onClick={actions.dismissNotice} className="text-rose-500 hover:text-rose-700" aria-label="Dismiss">
         ✕
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Toasts: toast.success("Saved") / toast.error("…") from anywhere; <Toaster /> renders them.
+// ---------------------------------------------------------------------------
+
+interface ToastItem {
+  id: number;
+  tone: "success" | "error";
+  text: string;
+}
+
+let toasts: ToastItem[] = [];
+let nextToastId = 1;
+const toastListeners = new Set<() => void>();
+const NO_TOASTS: ToastItem[] = [];
+
+function setToasts(next: ToastItem[]) {
+  toasts = next;
+  toastListeners.forEach((l) => l());
+}
+
+function dismissToast(id: number) {
+  setToasts(toasts.filter((t) => t.id !== id));
+}
+
+function showToast(tone: ToastItem["tone"], text: string) {
+  const id = nextToastId++;
+  setToasts([...toasts, { id, tone, text }]);
+  setTimeout(() => dismissToast(id), tone === "error" ? 7000 : 4000);
+}
+
+export const toast = {
+  success: (text: string) => showToast("success", text),
+  error: (text: string) => showToast("error", text),
+};
+
+export function Toaster() {
+  const items = useSyncExternalStore(
+    (l) => {
+      toastListeners.add(l);
+      return () => toastListeners.delete(l);
+    },
+    () => toasts,
+    () => NO_TOASTS,
+  );
+  return (
+    <div aria-live="polite" className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex flex-col items-end gap-2 sm:left-auto sm:right-6 sm:w-96">
+      {items.map((t) => (
+        <div
+          key={t.id}
+          role={t.tone === "error" ? "alert" : "status"}
+          className={cx(
+            "pointer-events-auto flex w-full items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm shadow-lg",
+            t.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-rose-200 bg-rose-50 text-rose-900",
+          )}
+        >
+          <span>
+            <span aria-hidden className="mr-1.5">
+              {t.tone === "success" ? "✓" : "!"}
+            </span>
+            {t.text}
+          </span>
+          <button onClick={() => dismissToast(t.id)} className="opacity-60 hover:opacity-100" aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

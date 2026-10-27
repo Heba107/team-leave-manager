@@ -365,6 +365,61 @@ export const actions = {
     await getSupabase().auth.signOut();
   },
 
+  // ---- my account (every role) ---------------------------------------------
+  /** Renames the signed-in person. Returns an error message to show, or null. */
+  async updateMyName(name: string): Promise<string | null> {
+    const sb = getSupabase();
+    const { data: saved, error } = await sb.rpc("update_my_name", { new_name: name });
+    if (error) {
+      console.error("updateMyName failed:", error);
+      return describe(error);
+    }
+    if (state.data) {
+      const { me } = state.data;
+      const rename = <T extends { id: string; name: string }>(x: T) => (x.id === me.id ? { ...x, name: saved } : x);
+      setState({
+        data: {
+          ...state.data,
+          me: { ...me, name: saved },
+          employees: state.data.employees.map(rename),
+          directory: state.data.directory.map(rename),
+        },
+      });
+    }
+    // Keep the auth profile in step (used to greet people in emails). Best effort.
+    sb.auth.updateUser({ data: { name: saved } }).then(({ error: e }) => e && console.warn("Auth name not updated:", e.message));
+    return null;
+  },
+  /**
+   * Changes the signed-in person's password. The current password is checked first so an
+   * unattended signed-in browser can't be used to take over the account.
+   * Returns an error message to show, or null.
+   */
+  async changePassword(current: string, next: string): Promise<string | null> {
+    const sb = getSupabase();
+    const email = state.session?.user.email;
+    if (!email) return "You need to be signed in.";
+    try {
+      const verify = await sb.auth.signInWithPassword({ email, password: current });
+      if (verify.error) {
+        if (/invalid login credentials/i.test(verify.error.message)) return "Your current password is incorrect.";
+        console.error("changePassword: current password check failed", verify.error);
+        return verify.error.message;
+      }
+      const { error } = await sb.auth.updateUser({ password: next });
+      if (!error) return null;
+      console.error("changePassword: updateUser failed", error);
+      if (/different from the old/i.test(error.message)) return "Choose a password that's different from your current one.";
+      if (error.code === "weak_password") return `That password is too weak. ${error.message}`;
+      if (error.code === "reauthentication_needed")
+        return "Supabase requires email confirmation for password changes. Use “Forgot password?” on the sign-in page instead.";
+      return error.message;
+    } catch (err) {
+      console.error("changePassword failed:", err);
+      return "Can't reach the server. Check your connection and try again.";
+    }
+  },
+
   // ---- employees (admin) -------------------------------------------------
   addEmployee(
     input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "squadId" | "openingBalance2026">,

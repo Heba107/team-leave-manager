@@ -148,6 +148,7 @@ export interface Database {
         Args: { p_backup: string; p_start: string; p_end: string };
         Returns: { name: string; start_date: string; end_date: string; status: "Approved" | "Pending" } | null;
       };
+      update_my_name: { Args: { new_name: string }; Returns: string };
       compute_leave_days: { Args: { p_start: string; p_end: string; p_duration: string }; Returns: number };
     };
     Enums: Record<never, never>;
