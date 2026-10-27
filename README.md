@@ -21,7 +21,7 @@ Because accounts aren't email-verified, someone could register a colleague's add
 
 ### Password reset
 
-"Forgot password?" calls `/api/password-reset`, which creates a one-time link with the Supabase admin API and sends it through the app's own email service (SMTP or Resend, see below). The link opens `/reset-password`, where the person chooses a new password. It works in any browser, works once, and expires after 1 hour. If the app's email service isn't configured, the app falls back to Supabase's own mailer, which needs custom SMTP set up in Supabase (Authentication → Emails → SMTP Settings).
+"Forgot password?" calls `/api/password-reset`, which asks Supabase Auth (`resetPasswordForEmail`) to email a reset link that opens `APP_URL/reset-password`, where the person chooses a new password. The email is sent by **Supabase**, so set up custom SMTP in Supabase (Authentication → Emails → SMTP Settings). With Resend that's host `smtp.resend.com`, port `465`, user `resend`, and your Resend API key as the password; the sender must be on a domain verified in Resend. Set `APP_URL` to the app's public address.
 
 In Supabase → Authentication → URL Configuration, set **Site URL** to your production URL and add `https://<your-domain>/reset-password` and `http://localhost:3000/reset-password` to **Redirect URLs**.
 

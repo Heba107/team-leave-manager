@@ -340,8 +340,8 @@ export const actions = {
     return error ? error.message : null;
   },
   /**
-   * Sends a reset link that opens /reset-password. Uses the app's own email service
-   * (/api/password-reset); falls back to Supabase's mailer if that isn't configured.
+   * Asks /api/password-reset to have Supabase email a reset link that opens /reset-password.
+   * Falls back to calling Supabase from the browser if the route isn't configured.
    * Returns an error message to show, or null.
    */
   async sendPasswordReset(email: string): Promise<string | null> {

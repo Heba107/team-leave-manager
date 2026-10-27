@@ -9,9 +9,9 @@ type Stage = "checking" | "ready" | "saving" | "done" | "invalid";
 
 /**
  * Landing page for password-reset links. Accepts:
- *  - ?token_hash=…&type=recovery  (links sent by /api/password-reset; work in any browser)
- *  - ?code=…                      (links sent by Supabase itself; exchanged automatically,
- *                                  only in the browser where the reset was requested)
+ *  - #access_token=…&type=recovery (Supabase emails requested by /api/password-reset)
+ *  - ?token_hash=…&type=recovery   (custom email templates)
+ *  - ?code=…                       (resets requested from this browser; exchanged automatically)
  * Then lets the person choose a new password.
  */
 export default function ResetPasswordPage() {
@@ -32,14 +32,19 @@ export default function ResetPasswordPage() {
       const tokenHash = params.get("token_hash");
       let failure = linkError ? linkError.replace(/\+/g, " ") : "";
 
-      if (!failure && tokenHash) {
+      const accessToken = hash.get("access_token");
+      const refreshToken = hash.get("refresh_token");
+      if (!failure && accessToken && refreshToken) {
+        const { error } = await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        if (error) failure = error.message;
+      } else if (!failure && tokenHash) {
         const { error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
         if (error) failure = error.message;
       }
       // For ?code= links the client has already exchanged the code while starting up.
       const { data } = await sb.auth.getSession();
       if (!live) return;
-      // Remove the one-time token from the address bar.
+      // Remove the one-time token (query or #fragment) from the address bar.
       window.history.replaceState(null, "", "/reset-password");
       if (data.session && !failure) {
         setStage("ready");
