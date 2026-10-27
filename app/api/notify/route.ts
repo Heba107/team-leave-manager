@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/lib/email";
+import { openTasksForEmail } from "@/lib/jira";
+import { button, dates, details, esc, handoverEmail, layout } from "@/lib/leaveEmails";
 import type { Database, LeaveNotification } from "@/lib/supabase/database.types";
 
 /**
@@ -11,6 +13,8 @@ import type { Database, LeaveNotification } from "@/lib/supabase/database.types"
  *   the General Manager for a team lead's own request (falls back to the other
  *   admins if neither is set). Allowed for the request's owner or an admin.
  * - decided:   emails the employee that their request was Approved / Rejected.
+ *   On approval it also emails the direct manager and squad lead a handover with
+ *   the employee's open Jira tasks (or a note if Jira couldn't be reached).
  *   Allowed for admins only.
  *
  * Who may see what is enforced by the database function leave_notification(),
@@ -76,56 +80,21 @@ export async function POST(request: Request) {
   }
 
   const result = await sendEmail(email);
-  const rule = event === "submitted" ? { rule: info.recipient_rule } : {};
-  if ("error" in result) return Response.json({ ...result, ...rule }, { status: 502 });
-  return Response.json({ ...result, ...rule });
-}
+  const extra: Record<string, unknown> = event === "submitted" ? { rule: info.recipient_rule } : {};
 
-function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function dates(info: LeaveNotification) {
-  const { start_date, end_date } = info.leave;
-  return start_date === end_date ? start_date : `${start_date} → ${end_date}`;
-}
-
-function duration(info: LeaveNotification) {
-  const l = info.leave;
-  if (l.duration_type === "half_am") return "Half-day (morning)";
-  if (l.duration_type === "half_pm") return "Half-day (afternoon)";
-  if (l.duration_type === "hourly") {
-    const time = l.start_time && l.end_time ? ` (${l.start_time.slice(0, 5)}–${l.end_time.slice(0, 5)})` : "";
-    return `Hourly permission: ${Number(l.hours)}h${time}`;
+  // Approved: handover with open Jira tasks for the direct manager and squad lead.
+  // Jira problems never fail the request; the email says the tasks couldn't be fetched.
+  if (event === "decided" && info.leave.status === "Approved") {
+    const to = [...new Set(info.handover_recipients.map((r) => r.email).filter(Boolean))];
+    if (to.length) {
+      const jira = await openTasksForEmail(info.employee.email);
+      const handover = await sendEmail({ to, ...handoverEmail(info, jira, appUrl, "approved") });
+      extra.handover = { ...handover, jira: jira.ok ? { ok: true, tasks: jira.tasks.length } : jira };
+    } else {
+      extra.handover = { sent: false, reason: "No direct manager or squad lead with an email address" };
+    }
   }
-  return "Full day(s)";
-}
 
-function details(info: LeaveNotification) {
-  const rows: [string, string][] = [
-    ["Employee", info.employee.name],
-    ["Type", info.leave.type],
-    ["Dates", dates(info)],
-    ["Duration", duration(info)],
-    ["Status", info.leave.status],
-  ];
-  if (info.backup) rows.push(["Backup / handover", info.backup]);
-  if (info.leave.notes) rows.push(["Notes", info.leave.notes]);
-  if (info.leave.has_attachment) rows.push(["Attachment", "Medical certificate attached (view in the app)"]);
-  return `<table style="border-collapse:collapse;margin:16px 0;font-size:14px">${rows
-    .map(
-      ([k, v]) =>
-        `<tr><td style="padding:4px 16px 4px 0;color:#71717a">${k}</td><td style="padding:4px 0;color:#18181b">${esc(v)}</td></tr>`,
-    )
-    .join("")}</table>`;
-}
-
-function button(href: string, label: string) {
-  return `<p><a href="${esc(href)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">${label}</a></p>`;
-}
-
-function layout(title: string, body: string) {
-  return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#18181b">
-<h2 style="margin:0 0 8px;font-size:18px">${title}</h2>${body}
-<p style="margin-top:24px;font-size:12px;color:#a1a1aa">Team Leave Manager</p></div>`;
+  if ("error" in result) return Response.json({ ...result, ...extra }, { status: 502 });
+  return Response.json({ ...result, ...extra });
 }

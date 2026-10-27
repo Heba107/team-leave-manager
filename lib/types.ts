@@ -29,6 +29,7 @@ export interface Employee {
   openingBalance2026: number | null;
   /** Direct manager: receives this person's leave-request emails. */
   managerId: string | null;
+  squadId: string | null;
   /** Supabase Auth user linked to this employee (null until they sign up). */
   userId: string | null;
   createdAt: string;
@@ -54,6 +55,13 @@ export interface Leave {
   status: LeaveStatus;
   notes: string;
   createdAt: string;
+}
+
+export interface Squad {
+  id: string;
+  name: string;
+  /** Squad lead: gets the Jira handover email when a squad member's leave is approved. */
+  leadId: string | null;
 }
 
 export interface Holiday {
@@ -98,5 +106,6 @@ export interface AppData extends Calendar {
   leaves: Leave[];
   /** Names of all active colleagues (for backup person selection and labels). */
   directory: DirectoryEntry[];
+  squads: Squad[];
   me: Employee;
 }

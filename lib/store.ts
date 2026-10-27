@@ -4,11 +4,12 @@ import { useSyncExternalStore } from "react";
 import type { PostgrestError, Session } from "@supabase/supabase-js";
 import { getSupabase } from "./supabase/client";
 import type { Database } from "./supabase/database.types";
-import type { AppData, Employee, Holiday, Leave, LeaveType, Settings } from "./types";
+import type { AppData, Employee, Holiday, Leave, LeaveType, Settings, Squad } from "./types";
 
 type EmployeeRow = Database["public"]["Tables"]["employees"]["Row"];
 type LeaveRow = Database["public"]["Tables"]["leaves"]["Row"];
 type HolidayRow = Database["public"]["Tables"]["public_holidays"]["Row"];
+type SquadRow = Database["public"]["Tables"]["squads"]["Row"];
 
 export const ATTACHMENT_BUCKET = "leave-attachments";
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -62,6 +63,7 @@ const toEmployee = (r: EmployeeRow): Employee => ({
   role: r.role,
   annualAllowance: Number(r.annual_allowance),
   managerId: r.manager_id,
+  squadId: r.squad_id,
   openingBalance2026: r.opening_balance_2026 === null ? null : Number(r.opening_balance_2026),
   userId: r.user_id,
   createdAt: r.created_at,
@@ -85,6 +87,8 @@ const toLeave = (r: LeaveRow): Leave => ({
   notes: r.notes,
   createdAt: r.created_at,
 });
+
+const toSquad = (r: SquadRow): Squad => ({ id: r.id, name: r.name, leadId: r.lead_id });
 
 const toHoliday = (r: HolidayRow): Holiday => ({ id: r.id, name: r.name, startDate: r.start_date, endDate: r.end_date });
 
@@ -115,6 +119,7 @@ function employeePatch(patch: Partial<Omit<Employee, "id">>) {
   if (patch.role !== undefined) out.role = patch.role;
   if (patch.annualAllowance !== undefined) out.annual_allowance = patch.annualAllowance;
   if (patch.managerId !== undefined) out.manager_id = patch.managerId;
+  if (patch.squadId !== undefined) out.squad_id = patch.squadId;
   if (patch.openingBalance2026 !== undefined) out.opening_balance_2026 = patch.openingBalance2026;
   return out;
 }
@@ -171,12 +176,13 @@ async function fetchAll<T>(
 
 async function fetchData(userId: string): Promise<AppData | null> {
   const sb = getSupabase();
-  const [employees, leaves, settings, holidays, directory] = await Promise.all([
+  const [employees, leaves, settings, holidays, directory, squads] = await Promise.all([
     fetchAll<EmployeeRow>((a, b) => sb.from("employees").select("*").order("name").range(a, b)),
     fetchAll<LeaveRow>((a, b) => sb.from("leaves").select("*").order("start_date").range(a, b)),
     sb.from("app_settings").select("*").eq("id", 1).maybeSingle().then(check),
     sb.from("public_holidays").select("*").order("start_date").then(check),
     sb.rpc("employee_directory").then(check),
+    sb.from("squads").select("*").order("name").then(check),
   ]);
   const me = employees.find((e) => e.user_id === userId && e.active);
   if (!me) return null;
@@ -185,6 +191,7 @@ async function fetchData(userId: string): Promise<AppData | null> {
     leaves: leaves.map(toLeave),
     holidays: (holidays ?? []).map(toHoliday),
     directory: directory ?? [],
+    squads: (squads ?? []).map(toSquad),
     me: toEmployee(me),
     settings: settings
       ? {
@@ -342,7 +349,7 @@ export const actions = {
 
   // ---- employees (admin) -------------------------------------------------
   addEmployee(
-    input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "openingBalance2026">,
+    input: Pick<Employee, "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "squadId" | "openingBalance2026">,
   ) {
     const employee: Employee = {
       ...input,
@@ -364,6 +371,7 @@ export const actions = {
             role: employee.role,
             annual_allowance: employee.annualAllowance,
             manager_id: employee.managerId,
+            squad_id: employee.squadId,
             opening_balance_2026: employee.openingBalance2026,
           }),
         );
@@ -482,6 +490,38 @@ export const actions = {
         ),
     );
   },
+  // ---- squads (admin) ----------------------------------------------------
+  addSquad(name: string) {
+    const squad: Squad = { id: crypto.randomUUID(), name, leadId: null };
+    return optimistic(
+      (d) => ({ ...d, squads: [...d.squads, squad].sort((a, b) => a.name.localeCompare(b.name)) }),
+      () => run(getSupabase().from("squads").insert({ id: squad.id, name: squad.name })),
+    );
+  },
+  updateSquad(id: string, patch: Partial<Omit<Squad, "id">>) {
+    return optimistic(
+      (d) => ({ ...d, squads: d.squads.map((s) => (s.id === id ? { ...s, ...patch } : s)).sort((a, b) => a.name.localeCompare(b.name)) }),
+      () =>
+        run(
+          getSupabase()
+            .from("squads")
+            .update({ ...(patch.name !== undefined && { name: patch.name }), ...(patch.leadId !== undefined && { lead_id: patch.leadId }) })
+            .eq("id", id),
+        ),
+    );
+  },
+  /** Deletes a squad; its members simply end up without a squad. */
+  deleteSquad(id: string) {
+    return optimistic(
+      (d) => ({
+        ...d,
+        squads: d.squads.filter((s) => s.id !== id),
+        employees: d.employees.map((e) => (e.squadId === id ? { ...e, squadId: null } : e)),
+      }),
+      () => run(getSupabase().from("squads").delete().eq("id", id)),
+    );
+  },
+
   addHoliday(input: Omit<Holiday, "id">) {
     const holiday: Holiday = { ...input, id: crypto.randomUUID() };
     return optimistic(

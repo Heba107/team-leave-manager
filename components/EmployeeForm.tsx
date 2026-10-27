@@ -1,17 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import type { Employee, Role } from "@/lib/types";
+import type { Employee, Role, Squad } from "@/lib/types";
 import { Button, Field, inputClass } from "./ui";
 
 export type EmployeeInput = Pick<
   Employee,
-  "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "openingBalance2026"
+  "name" | "email" | "department" | "position" | "role" | "annualAllowance" | "managerId" | "squadId" | "openingBalance2026"
 >;
 
 export function EmployeeForm({
   initial,
   existing,
+  squads,
   isSelf,
   recorded2026 = 0,
   onSubmit,
@@ -19,6 +20,7 @@ export function EmployeeForm({
 }: {
   initial?: Employee;
   existing: Employee[];
+  squads: Squad[];
   /** Editing your own record: role can't be changed (prevents locking yourself out). */
   isSelf?: boolean;
   /** Approved 2026 leave days (deducting types) already recorded in the app for this person. */
@@ -34,6 +36,7 @@ export function EmployeeForm({
     role: initial?.role ?? ("employee" as Role),
     annualAllowance: String(initial?.annualAllowance ?? 21),
     managerId: initial?.managerId ?? "",
+    squadId: initial?.squadId ?? "",
     openingBalance2026: initial?.openingBalance2026 == null ? "" : String(initial.openingBalance2026),
   });
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
@@ -74,6 +77,7 @@ export function EmployeeForm({
       role: form.role,
       annualAllowance: allowance,
       managerId: form.managerId || null,
+      squadId: form.squadId || null,
       openingBalance2026: form.openingBalance2026.trim() === "" ? null : Number(form.openingBalance2026),
     });
   }
@@ -132,6 +136,17 @@ export function EmployeeForm({
             : " Leave recorded here from now on is deducted from it."}{" "}
           What&apos;s left on 31 Dec carries into Q1 2027.
         </span>
+      </Field>
+      <Field label="Squad">
+        <select className={inputClass} value={form.squadId} onChange={set("squadId")}>
+          <option value="">No squad</option>
+          {squads.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        {squads.length === 0 && <span className="mt-1 block text-xs text-zinc-500">Create squads with “Manage squads” on the Employees page.</span>}
       </Field>
       <Field label="Direct manager">
         <select className={inputClass} value={form.managerId} onChange={set("managerId")}>

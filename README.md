@@ -56,6 +56,19 @@ Who gets the email about a new **Pending** request:
 
 Approving or rejecting a request emails the employee. Emails only decide who is notified: every admin still sees and can manage every request.
 
+## Squads
+
+Admins create, rename and delete squads and pick a **squad lead** under Employees → **Manage squads**, and assign each person to one squad in their profile. Squad badges and a squad filter appear on the Employees page and the Leave Records board. Squads don't change approvals or request emails, which still follow the direct manager and General Manager.
+
+## Jira handover emails
+
+With `JIRA_DOMAIN`, `JIRA_ADMIN_EMAIL` and `JIRA_API_TOKEN` set, the app looks up the employee's open Jira issues by their email address:
+
+- **On approval:** the employee's direct manager and squad lead get a handover email listing each open task's key, title, status and due date, with links. Tasks due during the leave are highlighted.
+- **3 days before the leave starts:** a daily job (`/api/cron/leave-reminders`, 07:00 UTC in `vercel.json`, which is 09:00 in Cairo in winter and 10:00 in summer) sends the same summary as a reminder. Each leave gets one reminder. If neither a manager nor a squad lead is set, the General Manager gets it. Set `CRON_SECRET` in Vercel so only Vercel can trigger the job.
+
+If Jira isn't configured or doesn't respond within 8 seconds, the approval goes through normally and the email says the tasks couldn't be fetched.
+
 ## Attachments
 
 Sick leaves can carry a medical certificate (PDF or image, up to 10 MB) stored in the private `leave-attachments` Supabase Storage bucket. Only the employee and admins can open it, through short-lived signed links.

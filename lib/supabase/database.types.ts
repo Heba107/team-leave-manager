@@ -15,6 +15,7 @@ type EmployeeRow = {
   role: "admin" | "employee";
   user_id: string | null;
   manager_id: string | null;
+  squad_id: string | null;
   opening_balance_2026: number | null;
   annual_allowance: number;
   created_at: string;
@@ -36,8 +37,11 @@ type LeaveRow = {
   attachment_path: string | null;
   /** Calculated by the database (weekends and public holidays excluded); read-only for the app. */
   leave_days: number | null;
+  handover_reminder_sent_at: string | null;
   created_at: string;
 };
+
+type SquadRow = { id: string; name: string; lead_id: string | null; created_at: string };
 
 type HolidayRow = { id: string; name: string; start_date: string; end_date: string; created_at: string };
 
@@ -69,6 +73,7 @@ export interface Database {
           | "role"
           | "user_id"
           | "manager_id"
+          | "squad_id"
           | "opening_balance_2026"
           | "annual_allowance"
           | "created_at"
@@ -90,6 +95,7 @@ export interface Database {
           | "backup_employee_id"
           | "attachment_path"
           | "leave_days"
+          | "handover_reminder_sent_at"
           | "created_at"
         >;
         Update: Partial<LeaveRow>;
@@ -109,6 +115,12 @@ export interface Database {
             referencedColumns: ["id"];
           },
         ];
+      };
+      squads: {
+        Row: SquadRow;
+        Insert: Optional<SquadRow, "id" | "lead_id" | "created_at">;
+        Update: Partial<SquadRow>;
+        Relationships: [];
       };
       public_holidays: {
         Row: HolidayRow;
@@ -163,4 +175,7 @@ export interface LeaveNotification {
   /** employee: direct manager + General Manager; team_lead: General Manager; admin_fallback: other admins. */
   recipient_rule: "employee" | "team_lead" | "admin_fallback";
   recipients: { name: string; email: string; why: "direct_manager" | "general_manager" | "admin_fallback" }[];
+  /** Direct manager + squad lead: receive the Jira handover summary when the leave is approved. */
+  handover_recipients: { name: string; email: string; why: "direct_manager" | "squad_lead" }[];
+  squad: string | null;
 }

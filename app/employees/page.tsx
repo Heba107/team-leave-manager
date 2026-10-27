@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { EmployeeForm } from "@/components/EmployeeForm";
+import { matchesSquad, SquadBadge, SquadFilter, SquadManager, type SquadFilterValue } from "@/components/Squads";
 import { Button, Card, cx, EmptyState, inputClass, Loading, Modal, PageHeader } from "@/components/ui";
 import { todayISO } from "@/lib/dates";
 import { annualBalance, approved, formatDays, formatHours, isOnLeave } from "@/lib/leave";
@@ -14,6 +15,8 @@ export default function EmployeesPage() {
   const data = useAppData();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("active");
+  const [squadFilter, setSquadFilter] = useState<SquadFilterValue>("");
+  const [managingSquads, setManagingSquads] = useState(false);
   const [editing, setEditing] = useState<Employee | "new" | null>(null);
   const [confirming, setConfirming] = useState<Employee | null>(null);
 
@@ -28,6 +31,7 @@ export default function EmployeesPage() {
   const q = query.trim().toLowerCase();
   const visible = employees
     .filter((e) => (status === "all" ? true : status === "active" ? e.active : !e.active))
+    .filter((e) => matchesSquad(e.squadId, squadFilter))
     .filter((e) => !q || [e.name, e.email, e.department, e.position].some((v) => v.toLowerCase().includes(q)))
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -36,17 +40,27 @@ export default function EmployeesPage() {
       <PageHeader
         title="Employees"
         description={`Manage team members, roles and ${year} annual allowances. Deactivated members keep their leave history.`}
-        actions={<Button onClick={() => setEditing("new")}>+ Add member</Button>}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setManagingSquads(true)}>
+              Manage squads
+            </Button>
+            <Button onClick={() => setEditing("new")}>+ Add member</Button>
+          </>
+        }
       />
 
       <Card>
         <div className="flex flex-col gap-3 border-b border-zinc-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <input
-            className={cx(inputClass, "sm:max-w-xs")}
-            placeholder="Search name, email, department…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <input
+              className={cx(inputClass, "sm:max-w-xs")}
+              placeholder="Search name, email, department…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <SquadFilter squads={data.squads} value={squadFilter} onChange={setSquadFilter} className="sm:max-w-48" />
+          </div>
           <div className="inline-flex rounded-lg bg-zinc-100 p-1 text-sm">
             {(["active", "inactive", "all"] as const).map((s) => (
               <button
@@ -103,6 +117,11 @@ export default function EmployeesPage() {
                           {e.name}
                           {e.role === "admin" && (
                             <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">Admin</span>
+                          )}
+                          {e.squadId && (
+                            <span className="ml-2">
+                              <SquadBadge squad={data.squads.find((s) => s.id === e.squadId)} />
+                            </span>
                           )}
                         </p>
                         <p className="text-xs text-zinc-500">
@@ -197,6 +216,7 @@ export default function EmployeesPage() {
             key={editing === "new" ? "new" : editing.id}
             initial={editing === "new" ? undefined : editing}
             existing={employees}
+            squads={data.squads}
             isSelf={editing !== "new" && editing.id === me.id}
             recorded2026={editing === "new" ? 0 : annualBalance(editing, leaves, 2026, data, "2026-12-31").used}
             onCancel={() => setEditing(null)}
@@ -207,6 +227,10 @@ export default function EmployeesPage() {
             }}
           />
         )}
+      </Modal>
+
+      <Modal open={managingSquads} title="Squads" onClose={() => setManagingSquads(false)}>
+        {managingSquads && <SquadManager squads={data.squads} employees={employees} />}
       </Modal>
 
       <Modal open={confirming !== null} title="Deactivate team member?" onClose={() => setConfirming(null)}>

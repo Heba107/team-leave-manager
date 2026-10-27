@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { AttachmentLink, LeaveForm } from "@/components/LeaveForm";
+import { matchesSquad, SquadBadge, SquadFilter, type SquadFilterValue } from "@/components/Squads";
 import {
   Button,
   Card,
@@ -42,6 +43,7 @@ function LeavesView() {
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | "">("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [squadFilter, setSquadFilter] = useState<SquadFilterValue>("");
 
   if (!data) return <Loading />;
   const { employees, leaves, me } = data;
@@ -61,13 +63,15 @@ function LeavesView() {
   const q = query.trim().toLowerCase();
   const visible = leaves
     .filter((l) => !q || nameOf(l.employeeId).toLowerCase().includes(q) || l.notes.toLowerCase().includes(q))
+    .filter((l) => !squadFilter || matchesSquad(employees.find((e) => e.id === l.employeeId)?.squadId, squadFilter))
     .filter((l) => !typeFilter || l.type === typeFilter)
     .filter((l) => !statusFilter || l.status === statusFilter)
     .filter((l) => !from || l.endDate >= from)
     .filter((l) => !to || l.startDate <= to)
     .sort((a, b) => b.startDate.localeCompare(a.startDate));
 
-  const hasFilters = q || typeFilter || statusFilter || from || to;
+  const hasFilters = q || typeFilter || statusFilter || from || to || squadFilter;
+  const squadOf = (employeeId: string) => data.squads.find((s) => s.id === employees.find((e) => e.id === employeeId)?.squadId);
   const canEdit = (l: Leave) => admin || (l.employeeId === me.id && l.status === "Pending");
 
   const exportRows = () => {
@@ -137,7 +141,7 @@ function LeavesView() {
       />
 
       <Card>
-        <div className={cx("grid grid-cols-1 gap-3 border-b border-zinc-100 p-4 sm:grid-cols-2", admin ? "lg:grid-cols-6" : "lg:grid-cols-5")}>
+        <div className={cx("grid grid-cols-1 gap-3 border-b border-zinc-100 p-4 sm:grid-cols-2", admin ? "lg:grid-cols-7" : "lg:grid-cols-5")}>
           {admin && (
             <input
               className={cx(inputClass, "lg:col-span-2")}
@@ -149,6 +153,7 @@ function LeavesView() {
           {!admin && (
             <input className={inputClass} placeholder="Search notes…" value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
+          {admin && <SquadFilter squads={data.squads} value={squadFilter} onChange={setSquadFilter} />}
           <select className={inputClass} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as LeaveType | "")}>
             <option value="">All types</option>
             {LEAVE_TYPES.map((t) => (
@@ -177,6 +182,7 @@ function LeavesView() {
                 setStatusFilter("");
                 setFrom("");
                 setTo("");
+                setSquadFilter("");
               }}
             >
               Clear filters
@@ -206,7 +212,14 @@ function LeavesView() {
                   const overlapCount = admin && l.status !== "Rejected" && l.durationType !== "hourly" ? findTeamOverlaps(l, leaves).length : 0;
                   return (
                     <tr key={l.id} className="hover:bg-zinc-50">
-                      {admin && <td className="px-4 py-3 font-medium text-zinc-900">{nameOf(l.employeeId)}</td>}
+                      {admin && (
+                        <td className="px-4 py-3 font-medium text-zinc-900">
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {nameOf(l.employeeId)}
+                            <SquadBadge squad={squadOf(l.employeeId)} />
+                          </span>
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <TypeBadge type={l.type} />
                       </td>

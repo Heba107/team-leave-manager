@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AttachmentLink } from "@/components/LeaveForm";
+import { SquadBadge } from "@/components/Squads";
 import { Button, buttonClass, Card, cx, EmptyState, Loading, PageHeader, StatCard, StatusBadge, TypeBadge } from "@/components/ui";
 import { addDays, endOfMonth, formatDate, formatMonth, formatShort, startOfMonth, todayISO } from "@/lib/dates";
 import {
@@ -101,8 +102,9 @@ function TeamDashboard({ data }: { data: AppData }) {
               {pending.map((l) => (
                 <li key={l.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-zinc-900">
-                      {nameOf(l.employeeId)} <TypeBadge type={l.type} />
+                    <p className="flex flex-wrap items-center gap-1.5 font-medium text-zinc-900">
+                      {nameOf(l.employeeId)} <SquadBadge squad={data.squads.find((s) => s.id === employees.find((e) => e.id === l.employeeId)?.squadId)} />
+                      <TypeBadge type={l.type} />
                     </p>
                     <p className="text-xs text-zinc-500">
                       {formatShort(l.startDate)}
