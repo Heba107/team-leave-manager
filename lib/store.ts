@@ -339,9 +339,36 @@ export const actions = {
     const { error } = await getSupabase().auth.signInWithPassword({ email, password });
     return error ? error.message : null;
   },
+  /**
+   * Sends a reset link that opens /reset-password. Uses the app's own email service
+   * (/api/password-reset); falls back to Supabase's mailer if that isn't configured.
+   * Returns an error message to show, or null.
+   */
   async sendPasswordReset(email: string): Promise<string | null> {
-    const { error } = await getSupabase().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-    return error ? error.message : null;
+    try {
+      const res = await fetch("/api/password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (res.ok) return null;
+      const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+      if (body.code !== "not_configured") {
+        console.error("Password reset failed:", res.status, body);
+        return body.error ?? "Couldn't send the reset email. Please try again.";
+      }
+    } catch (err) {
+      console.error("Password reset request failed:", err);
+    }
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (!error) return null;
+    console.error("Supabase resetPasswordForEmail failed:", error);
+    if (/sending recovery email/i.test(error.message))
+      return "The reset email couldn't be sent: the email service isn't set up correctly. Please contact your team lead.";
+    if (/rate limit/i.test(error.message)) return "Too many reset emails were requested. Please wait a while and try again.";
+    return error.message;
   },
   async signOut() {
     await getSupabase().auth.signOut();

@@ -19,6 +19,12 @@ Only email domains listed in Settings → **Who can sign up** may create account
 
 Because accounts aren't email-verified, someone could register a colleague's address before they do. Ask team members to create their accounts promptly, and check new names on the Employees page.
 
+### Password reset
+
+"Forgot password?" calls `/api/password-reset`, which creates a one-time link with the Supabase admin API and sends it through the app's own email service (SMTP or Resend, see below). The link opens `/reset-password`, where the person chooses a new password. It works in any browser, works once, and expires after 1 hour. If the app's email service isn't configured, the app falls back to Supabase's own mailer, which needs custom SMTP set up in Supabase (Authentication → Emails → SMTP Settings).
+
+In Supabase → Authentication → URL Configuration, set **Site URL** to your production URL and add `https://<your-domain>/reset-password` and `http://localhost:3000/reset-password` to **Redirect URLs**.
+
 ## Roles
 
 | | Admin (team lead) | Employee |

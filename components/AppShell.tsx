@@ -14,6 +14,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { status, session, data } = useStore();
   const pathname = usePathname();
 
+  // The password-reset page stands alone: it must work while signed out and before any data loads.
+  if (pathname.startsWith("/reset-password")) return <>{children}</>;
+
   if (status === "signed-out") return <LoginScreen />;
   if (status === "unlinked") return <UnlinkedScreen email={session?.user.email ?? ""} />;
 
