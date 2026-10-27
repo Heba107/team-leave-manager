@@ -229,7 +229,7 @@ begin
     select tgname, tgrelid::regclass as tbl from pg_trigger
     where tgrelid in ('public.employees'::regclass, 'public.leaves'::regclass) and not tgisinternal
       and tgname not in ('leaves_check_overlap', 'leaves_enforce_permissions', 'employees_keep_one_admin', 'employees_link_account',
-                         'leaves_set_leave_days', 'leaves_check_backup_available')
+                         'leaves_set_leave_days', 'leaves_check_backup_available', 'employees_clear_stale_focal_point')
   loop
     raise notice 'Dropping trigger % on %', t.tgname, t.tbl;
     execute format('drop trigger %I on %s', t.tgname, t.tbl);

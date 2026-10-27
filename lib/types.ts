@@ -60,8 +60,10 @@ export interface Leave {
 export interface Squad {
   id: string;
   name: string;
-  /** Squad lead: gets the Jira handover email when a squad member's leave is approved. */
+  /** Squad lead (an admin): gets the Jira handover email when a squad member's leave is approved. */
   leadId: string | null;
+  /** Optional regular member of the squad who also gets handover emails. */
+  focalPointId: string | null;
 }
 
 export interface Holiday {

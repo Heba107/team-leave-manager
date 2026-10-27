@@ -13,7 +13,7 @@ import type { Database, LeaveNotification } from "@/lib/supabase/database.types"
  *   the General Manager for a team lead's own request (falls back to the other
  *   admins if neither is set). Allowed for the request's owner or an admin.
  * - decided:   emails the employee that their request was Approved / Rejected.
- *   On approval it also emails the direct manager and squad lead a handover with
+ *   On approval it also emails the direct manager, squad lead and squad focal point a handover with
  *   the employee's open Jira tasks (or a note if Jira couldn't be reached).
  *   Allowed for admins only.
  *
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       const handover = await sendEmail({ to, ...handoverEmail(info, jira, appUrl, "approved") });
       extra.handover = { ...handover, jira: jira.ok ? { ok: true, tasks: jira.tasks.length } : jira };
     } else {
-      extra.handover = { sent: false, reason: "No direct manager or squad lead with an email address" };
+      extra.handover = { sent: false, reason: "No direct manager, squad lead or focal point with an email address" };
     }
   }
 

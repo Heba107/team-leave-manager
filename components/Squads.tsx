@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { managerOptions } from "@/lib/managers";
 import { actions } from "@/lib/store";
 import type { Employee, Squad } from "@/lib/types";
 import { Button, cx, EmptyState, inputClass } from "./ui";
@@ -71,7 +72,13 @@ export function SquadManager({ squads, employees }: { squads: Squad[]; employees
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const active = employees.filter((e) => e.active).sort((a, b) => a.name.localeCompare(b.name));
+  // Squad leads are admins (team leads); focal points are regular members of that squad.
+  const leads = managerOptions(employees);
+  const focalOptions = (squadId: string) =>
+    employees
+      .filter((e) => e.active && e.role === "employee" && e.squadId === squadId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  const nameOf = (id: string | null) => employees.find((e) => e.id === id)?.name ?? "Unknown";
   const taken = (name: string, exceptId?: string) =>
     squads.some((s) => s.id !== exceptId && s.name.trim().toLowerCase() === name.trim().toLowerCase());
 
@@ -124,18 +131,44 @@ export function SquadManager({ squads, employees }: { squads: Squad[]; employees
                   )}
                 </div>
                 <label className="flex items-center gap-2 text-xs text-zinc-600">
-                  <span className="shrink-0">Squad lead</span>
+                  <span className="w-20 shrink-0">Squad lead</span>
                   <select
                     className={cx(inputClass, "py-1 text-xs")}
                     value={s.leadId ?? ""}
                     onChange={(e) => actions.updateSquad(s.id, { leadId: e.target.value || null })}
                   >
                     <option value="">None</option>
-                    {active.map((e) => (
+                    {leads.map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.name}
                       </option>
                     ))}
+                    {s.leadId && !leads.some((e) => e.id === s.leadId) && (
+                      <option value={s.leadId} disabled>
+                        {nameOf(s.leadId)} (not an admin: choose someone else)
+                      </option>
+                    )}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-zinc-600">
+                  <span className="w-20 shrink-0">Focal point</span>
+                  <select
+                    className={cx(inputClass, "py-1 text-xs")}
+                    value={s.focalPointId ?? ""}
+                    disabled={!focalOptions(s.id).length && !s.focalPointId}
+                    onChange={(e) => actions.updateSquad(s.id, { focalPointId: e.target.value || null })}
+                  >
+                    <option value="">{focalOptions(s.id).length ? "None" : "No regular members in this squad yet"}</option>
+                    {focalOptions(s.id).map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                    {s.focalPointId && !focalOptions(s.id).some((e) => e.id === s.focalPointId) && (
+                      <option value={s.focalPointId} disabled>
+                        {nameOf(s.focalPointId)} (not a regular member: choose someone else)
+                      </option>
+                    )}
                   </select>
                 </label>
                 {confirmDelete === s.id && (
@@ -152,7 +185,8 @@ export function SquadManager({ squads, employees }: { squads: Squad[]; employees
       </form>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       <p className="text-xs text-zinc-500">
-        Squad leads get a handover email listing the member&apos;s open Jira tasks when leave is approved and 3 days before it starts.
+        The squad lead (an admin) and the optional focal point (a regular member of the squad) get a handover email listing the
+        member&apos;s open Jira tasks when leave is approved and 3 days before it starts, together with the direct manager.
         Request emails and approvals still follow each person&apos;s direct manager and the General Manager.
       </p>
     </div>

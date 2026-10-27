@@ -9,7 +9,7 @@ import type { Database } from "@/lib/supabase/database.types";
  *
  * Finds Approved leave (full or half day) starting exactly 3 days from today in Cairo,
  * fetches each person's open Jira tasks, and emails a handover summary to their
- * direct manager and squad lead (the General Manager if neither is set). Each leave
+ * direct manager, squad lead and squad focal point (the General Manager if none is set). Each leave
  * is reminded once: handover_reminder_sent_at is set after a successful send.
  *
  * Auth: "Authorization: Bearer <CRON_SECRET>" (Vercel Cron sends this automatically).
@@ -58,7 +58,13 @@ export async function GET(request: Request) {
     const emp = byId.get(l.employee_id);
     if (!emp || !emp.active) continue;
     const squad = (squads ?? []).find((s) => s.id === emp.squad_id);
-    let recipients = [usable(emp.manager_id, emp.id), usable(squad?.lead_id, emp.id)].filter((p) => !!p);
+    // The focal point only counts while they're still a member of this squad.
+    const focal = usable(squad?.focal_point_id, emp.id);
+    let recipients = [
+      usable(emp.manager_id, emp.id),
+      usable(squad?.lead_id, emp.id),
+      focal && focal.squad_id === emp.squad_id ? focal : undefined,
+    ].filter((p) => !!p);
     let fallback = false;
     if (!recipients.length) {
       const gm = usable(settings?.general_manager_id, emp.id);

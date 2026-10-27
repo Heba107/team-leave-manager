@@ -88,7 +88,7 @@ const toLeave = (r: LeaveRow): Leave => ({
   createdAt: r.created_at,
 });
 
-const toSquad = (r: SquadRow): Squad => ({ id: r.id, name: r.name, leadId: r.lead_id });
+const toSquad = (r: SquadRow): Squad => ({ id: r.id, name: r.name, leadId: r.lead_id, focalPointId: r.focal_point_id });
 
 const toHoliday = (r: HolidayRow): Holiday => ({ id: r.id, name: r.name, startDate: r.start_date, endDate: r.end_date });
 
@@ -381,7 +381,15 @@ export const actions = {
   },
   updateEmployee(id: string, patch: Partial<Omit<Employee, "id">>) {
     return optimistic(
-      (d) => ({ ...d, employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) }),
+      (d) => ({
+        ...d,
+        employees: d.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+        // Leaving a squad also stops someone being its focal point (the database does the same).
+        squads:
+          patch.squadId !== undefined
+            ? d.squads.map((s) => (s.focalPointId === id && s.id !== patch.squadId ? { ...s, focalPointId: null } : s))
+            : d.squads,
+      }),
       async () => {
         await run(getSupabase().from("employees").update(employeePatch(patch)).eq("id", id));
         if (patch.email !== undefined || patch.active !== undefined || patch.name !== undefined) await reload();
@@ -492,7 +500,7 @@ export const actions = {
   },
   // ---- squads (admin) ----------------------------------------------------
   addSquad(name: string) {
-    const squad: Squad = { id: crypto.randomUUID(), name, leadId: null };
+    const squad: Squad = { id: crypto.randomUUID(), name, leadId: null, focalPointId: null };
     return optimistic(
       (d) => ({ ...d, squads: [...d.squads, squad].sort((a, b) => a.name.localeCompare(b.name)) }),
       () => run(getSupabase().from("squads").insert({ id: squad.id, name: squad.name })),
@@ -505,7 +513,11 @@ export const actions = {
         run(
           getSupabase()
             .from("squads")
-            .update({ ...(patch.name !== undefined && { name: patch.name }), ...(patch.leadId !== undefined && { lead_id: patch.leadId }) })
+            .update({
+              ...(patch.name !== undefined && { name: patch.name }),
+              ...(patch.leadId !== undefined && { lead_id: patch.leadId }),
+              ...(patch.focalPointId !== undefined && { focal_point_id: patch.focalPointId }),
+            })
             .eq("id", id),
         ),
     );

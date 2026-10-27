@@ -41,7 +41,7 @@ type LeaveRow = {
   created_at: string;
 };
 
-type SquadRow = { id: string; name: string; lead_id: string | null; created_at: string };
+type SquadRow = { id: string; name: string; lead_id: string | null; focal_point_id: string | null; created_at: string };
 
 type HolidayRow = { id: string; name: string; start_date: string; end_date: string; created_at: string };
 
@@ -118,7 +118,7 @@ export interface Database {
       };
       squads: {
         Row: SquadRow;
-        Insert: Optional<SquadRow, "id" | "lead_id" | "created_at">;
+        Insert: Optional<SquadRow, "id" | "lead_id" | "focal_point_id" | "created_at">;
         Update: Partial<SquadRow>;
         Relationships: [];
       };
@@ -175,7 +175,7 @@ export interface LeaveNotification {
   /** employee: direct manager + General Manager; team_lead: General Manager; admin_fallback: other admins. */
   recipient_rule: "employee" | "team_lead" | "admin_fallback";
   recipients: { name: string; email: string; why: "direct_manager" | "general_manager" | "admin_fallback" }[];
-  /** Direct manager + squad lead: receive the Jira handover summary when the leave is approved. */
-  handover_recipients: { name: string; email: string; why: "direct_manager" | "squad_lead" }[];
+  /** Direct manager + squad lead + squad focal point: receive the Jira handover summary when the leave is approved. */
+  handover_recipients: { name: string; email: string; why: "direct_manager" | "squad_lead" | "focal_point" }[];
   squad: string | null;
 }
