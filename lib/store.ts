@@ -16,7 +16,7 @@ export const ATTACHMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "
 
 const DEFAULT_SETTINGS: Settings = {
   weekendDays: [5, 6],
-  deductingTypes: ["Annual"],
+  deductingTypes: ["Annual", "Sick", "Emergency"],
   hoursPerDay: 8,
   allowedSignupDomains: ["aman.eg"],
   generalManagerId: null,
